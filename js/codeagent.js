@@ -45,7 +45,8 @@ export async function runCodeAgent(request, { onStatus, signal } = {}) {
   let done = null;
   for (let step = 0; step < 40 && !done; step++) {
     onStatus?.(`Coding agent working… (step ${step + 1})`);
-    const resp = await claude({ model: settings.models.deep, system: SYSTEM, messages, tools: TOOLS, max_tokens: 16000, signal });
+    // Each step re-sends the growing conversation; caching its end makes the next step read it at ~5% of the price.
+    const resp = await claude({ model: settings.models.deep, system: SYSTEM, messages, tools: TOOLS, max_tokens: 16000, signal, purpose: 'code', cacheLast: true });
     if (resp.stop_reason === 'max_tokens') throw new Error('The coding agent ran out of output space; try a smaller, more specific change.');
     messages.push({ role: 'assistant', content: resp.content });
     const uses = resp.content.filter((b) => b.type === 'tool_use');

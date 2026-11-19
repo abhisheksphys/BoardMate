@@ -7,6 +7,12 @@ import { emit } from './bus.js';
 
 export const TOOL_SCHEMAS = [
   {
+    name: 'hand_off',
+    description:
+      'Pass this question to a stronger model, which continues with the full conversation. level "main" for careful multi-step reasoning, derivations, proofs, or checking subtle work; "deep" for the hardest problems. Not for reading the page, routine algebra, or short explanations.',
+    input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['main', 'deep'] }, reason: { type: 'string' } }, required: ['level'] },
+  },
+  {
     name: 'cas',
     description:
       'Run SymPy (Python) for exact symbolic math: differentiate, integrate, expand, simplify, solve, series, substitute, check equality, vector calculus. ' +
@@ -132,6 +138,15 @@ export async function runTool(use, ctx) {
   const snap = agent.lastSnap;
   try {
     switch (use.name) {
+      case 'hand_off': {
+        const order = { fast: 0, main: 1, deep: 2 };
+        if (agent.tier === 'deep') return ok(use.id, 'You are already the strongest model. Answer the question.');
+        let lvl = inp.level === 'deep' ? 'deep' : 'main';
+        if (order[lvl] <= order[agent.tier]) lvl = 'deep';
+        agent.tier = lvl;
+        return ok(use.id, `Handed off. You are now the stronger model (${settings.models[lvl]}); continue from here and answer the user's question fully.`);
+      }
+
       case 'cas': {
         panel.status('Computing with SymPy…');
         const r = await runSympy(inp.code || '');
@@ -178,7 +193,7 @@ export async function runTool(use, ctx) {
         if (!snap) return fail(use.id, 'No page image yet.');
         const a = board.imageToWorld(snap, inp.x, inp.y);
         const region = { x: a.x, y: a.y, w: inp.w / snap.scale, h: inp.h / snap.scale };
-        const crop = board.snapshot({ region, maxDim: 1400, maxScale: 4, pad: 0 });
+        const crop = board.snapshot({ region, maxDim: settings.imageMaxPx || 1100, maxScale: 4, pad: 0 });
         return ok(use.id, [imageBlock(crop), { type: 'text', text: 'Sharper view of the requested region.' }]);
       }
 

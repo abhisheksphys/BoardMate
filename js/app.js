@@ -10,6 +10,7 @@ import { Perception } from './perception.js';
 import { Changes } from './changes.js';
 import { SettingsUI } from './settingsUI.js';
 import { warmCas } from './cas.js';
+import { meter, fmt, overBudget } from './costs.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -144,6 +145,22 @@ on('mark', (m) => {
 });
 on('selection', (sel) => { $('#askSel').hidden = !sel; });
 
+// ---------- cost meter ----------
+function updateCost() {
+  const s = meter.stats();
+  const btn = $('#costBtn');
+  btn.textContent = `${fmt(s.today)} today`;
+  btn.classList.toggle('over', overBudget());
+}
+on('cost', updateCost);
+$('#costBtn').addEventListener('click', () => {
+  const s = meter.stats();
+  const names = { answer: 'Answers', watch: 'Watching', verify: 'Error checks', code: 'App changes' };
+  const by = Object.entries(s.byPurpose).map(([k, v]) => `- ${names[k] || k}: ${fmt(v)}`).join('\n') || '- nothing yet';
+  const budget = settings.dailyBudgetUSD > 0 ? `${fmt(settings.dailyBudgetUSD)} per day` : 'no limit';
+  panel.add('info', `**Spending**\n\nThis session: ${fmt(s.session)}\nToday: ${fmt(s.today)} (budget ${budget})\n${by}\n\nThis month: ${fmt(s.month)}\n\nEstimated from token counts at list prices; the Claude Console usage page is the exact record.`);
+});
+
 // ---------- settings → UI ----------
 function applySettings() {
   $('#attention').value = settings.attention;
@@ -152,6 +169,7 @@ function applySettings() {
   panel.renderActions();
   updateMic();
   board.render();
+  updateCost();
   if (settings.voiceIn !== 'continuous' && voice.want) voice.stopAll();
 }
 on('settings', applySettings);

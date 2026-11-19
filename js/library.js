@@ -76,7 +76,7 @@ async function findBook(ref) {
   return all.find((b) => b.id.toLowerCase().includes(q) || q.includes(b.id.toLowerCase())) || null;
 }
 
-export async function renderPage(bookRef, pageNum, scale = 1.6) {
+export async function renderPage(bookRef, pageNum, scale = 1.35) {
   const b = await findBook(bookRef);
   if (!b) throw new Error('Book not found: ' + bookRef);
   const lib = await pdfjs();

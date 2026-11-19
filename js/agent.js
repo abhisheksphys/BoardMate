@@ -1,11 +1,17 @@
 // The main assistant: every question (typed, spoken or from an action button) goes to Claude
 // together with the latest image of the page, your selection, and its notebook. No command parsing.
+//
+// Cost design: the fast model answers first and hands off to a stronger one only when needed;
+// tools + instructions + past conversation are prompt-cached; old turns are compacted (no images,
+// short tool outputs) so the cached prefix stays stable; history is trimmed in chunks.
 import { settings } from './settings.js';
 import { claude, textOf, imageBlock } from './claude.js';
 import { TOOL_SCHEMAS, runTool } from './tools.js';
+import { fmt, overBudget } from './costs.js';
 
-const MAX_EXCHANGES = 12;
 const MAX_STEPS = 14;
+const TIER_NAMES = { fast: 'Haiku', main: 'Sonnet', deep: 'Opus' };
+const nextTier = (t) => (t === 'fast' ? 'main' : 'deep');
 
 function systemPrompt() {
   const s = settings;
@@ -27,7 +33,10 @@ Answering
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
 - Use search_library and show_page for the user's own PDFs.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
-- Be concise and precise. The user is an expert; skip basics unless asked.
+- Be concise and precise. The user is an expert; skip basics and preamble. Shorter answers also cost less.
+
+Choosing the right model
+- Several models share this conversation. If you are the fast model and the question needs careful multi-step reasoning (a long derivation, a proof, subtle physics, judging whether tricky work is correct) or you are not confident, call hand_off with level "main"; for the hardest problems use "deep". Do not hand off for reading the page, routine algebra (use cas), definitions, or short explanations.
 
 Changing the app itself
 - Settings change through update_settings. Apply it when the user asks ("from now on…", "move the panel to the left"). If you only think a change would help, suggest it and wait for a yes.
@@ -38,15 +47,21 @@ Changing the app itself
 Current state: attention=${s.attention}, voiceIn=${s.voiceIn}, voiceOut=${s.voiceOut}, boardWriting=${s.allowBoardWrite}, panel=${s.panelPosition}.${custom}`;
 }
 
-// Replace images in older turns with a placeholder to keep requests small.
-function stripImages(content) {
-  if (!Array.isArray(content)) return content;
-  return content.map((b) => {
-    if (b.type === 'image') return { type: 'text', text: '[earlier image omitted]' };
-    if (b.type === 'tool_result' && Array.isArray(b.content)) return { ...b, content: stripImages(b.content) };
-    return b;
-  });
+// Old turns: drop images and shorten long tool outputs. Done once per turn, so the cached prefix stays identical afterwards.
+function compactBlock(b) {
+  if (b.type === 'image') return { type: 'text', text: '[earlier image omitted]' };
+  if (b.type === 'text' && b.text.includes('<board_context>')) {
+    return { type: 'text', text: b.text.replace(/<board_context>[\s\S]*?<\/board_context>/, '<board_context>[omitted]</board_context>') };
+  }
+  if (b.type === 'tool_result') {
+    let c = b.content;
+    if (Array.isArray(c)) c = c.map(compactBlock);
+    else if (typeof c === 'string' && c.length > 800) c = c.slice(0, 800) + ' …[truncated]';
+    return { ...b, content: c };
+  }
+  return b;
 }
+const compactExchange = (ex) => ex.map((m) => ({ ...m, content: Array.isArray(m.content) ? m.content.map(compactBlock) : m.content }));
 
 export class Agent {
   constructor({ board, panel, voice, changes }) {
@@ -59,6 +74,8 @@ export class Agent {
     this.busy = false;
     this.lastSnap = null;
     this.abort = null;
+    this.lastAskAt = 0;
+    this.tier = 'fast';
   }
 
   reset() {
@@ -72,35 +89,36 @@ export class Agent {
     this.board.setLocked(false);
   }
 
+  // Returns { messages, historyEnd } — historyEnd = index of the last message before the current turn.
   messages() {
-    const recent = this.exchanges.slice(-MAX_EXCHANGES);
     const out = [];
-    recent.forEach((ex, i) => {
-      const last = i === recent.length - 1;
+    let historyEnd = -1;
+    this.exchanges.forEach((ex, i) => {
       for (const m of ex) {
-        const content = last ? m.content : stripImages(m.content);
         const prev = out[out.length - 1];
-        if (prev && prev.role === m.role && m.role === 'user') {
-          prev.content = [...(Array.isArray(prev.content) ? prev.content : [{ type: 'text', text: prev.content }]), ...content];
-        } else out.push({ role: m.role, content });
+        if (prev && prev.role === 'user' && m.role === 'user') prev.content = [...prev.content, ...m.content];
+        else out.push({ role: m.role, content: Array.isArray(m.content) ? m.content.slice() : m.content });
       }
+      if (i === this.exchanges.length - 2) historyEnd = out.length - 1;
     });
-    return out;
+    return { messages: out, historyEnd };
   }
 
   buildTurn(text, { selection, origin }) {
     const b = this.board;
-    const snap = b.snapshot();
+    const max = settings.imageMaxPx || 1100;
+    // With a selection, the selection carries the detail, so the full page can be smaller.
+    const snap = b.snapshot({ maxDim: selection ? Math.min(800, max) : max, maxScale: 1.5 });
     this.lastSnap = snap;
     const content = [imageBlock(snap)];
-    if (selection) content.push(imageBlock(b.snapshot({ region: selection, maxDim: 1200, maxScale: 3, pad: 12 })));
+    if (selection) content.push(imageBlock(b.snapshot({ region: selection, maxDim: max, maxScale: 2.5, pad: 12 })));
     const page = b.page;
     const ctx = {
       page: page.name,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
       selection: selection ? b.rectToImage(snap, selection) : null,
       your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
-      notebook: page.notebook.map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
+      notebook: page.notebook.slice(-40).map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
       input: origin,
     };
     content.push({ type: 'text', text: `<board_context>${JSON.stringify(ctx)}</board_context>\n\n${text}` });
@@ -117,25 +135,47 @@ export class Agent {
     this.busy = true;
     this.spokeThisTurn = false;
     this.abort = new AbortController();
+
+    // Fresh conversation after a long break (its cache has expired anyway); trim history in chunks.
+    if (Date.now() - this.lastAskAt > settings.idleResetMin * 60000) this.exchanges = [];
+    const maxH = Math.max(1, settings.maxHistory);
+    if (this.exchanges.length >= maxH) this.exchanges = this.exchanges.slice(-Math.ceil(maxH / 2));
+    this.lastAskAt = Date.now();
+
+    if (overBudget() && !this.warnedBudget) {
+      this.warnedBudget = true;
+      this.panel.add('info', `You have passed today's budget (${fmt(settings.dailyBudgetUSD)}). Answers still work; live watching is paused until tomorrow. Change the budget in Settings → Cost.`);
+    }
+
+    this.tier = opts.tier || (settings.routing === 'auto' ? 'fast' : settings.routing);
     const ex = [];
+    let cost = 0;
+    let lastEl = null;
+    const tiersUsed = new Set();
     this.panel.status('Looking at your page…');
     try {
       ex.push({ role: 'user', content: this.buildTurn(text, opts) });
       this.exchanges.push(ex);
       const ctx = { board: this.board, panel: this.panel, voice: this.voice, agent: this, changes: this.changes };
       for (let step = 0; step < MAX_STEPS; step++) {
-        this.panel.status('Thinking…');
+        tiersUsed.add(this.tier);
+        this.panel.status(`Thinking (${TIER_NAMES[this.tier]})…`);
+        const { messages, historyEnd } = this.messages();
         const resp = await claude({
-          model: opts.deep ? settings.models.deep : settings.models.main,
+          model: settings.models[this.tier] || settings.models.main,
           system: systemPrompt(),
-          messages: this.messages(),
+          messages,
           tools: TOOL_SCHEMAS,
-          max_tokens: 4096,
+          max_tokens: this.tier === 'fast' ? 2048 : 4096,
           signal: this.abort.signal,
+          purpose: 'answer',
+          cacheAt: historyEnd >= 0 ? [historyEnd] : [],
+          cacheLast: true,
         });
+        cost += resp._cost || 0;
         ex.push({ role: 'assistant', content: resp.content });
         const t = textOf(resp);
-        if (t) this.panel.add('assistant', t, { actions: this.answerActions(t) });
+        if (t) lastEl = this.panel.add('assistant', t, { actions: this.answerActions(t) });
         const uses = resp.content.filter((c) => c.type === 'tool_use');
         if (!uses.length) break;
         const results = [];
@@ -153,6 +193,9 @@ export class Agent {
       } else this.panel.add('info', 'Stopped.');
     } finally {
       this.closeDanglingToolUse(ex);
+      const i = this.exchanges.indexOf(ex);
+      if (i >= 0) this.exchanges[i] = compactExchange(ex);
+      if (lastEl && cost) this.panel.footer(lastEl, `${fmt(cost)} · ${[...tiersUsed].map((t) => TIER_NAMES[t]).join(' → ')}`);
       this.busy = false;
       this.board.setLocked(false);
       this.panel.status('');
@@ -170,10 +213,21 @@ export class Agent {
   }
 
   answerActions(text) {
-    return [
+    const actions = [
       { label: 'Put on board', run: () => this.putTextOnBoard(text) },
       { label: 'Copy', run: (btn) => navigator.clipboard?.writeText(text).then(() => { btn.textContent = 'Copied'; }) },
     ];
+    if (this.tier !== 'deep') {
+      const up = nextTier(this.tier);
+      actions.push({
+        label: `Think harder (${TIER_NAMES[up]})`,
+        run: () => {
+          this.panel.add('user', `▸ Think harder (${TIER_NAMES[up]})`);
+          this.ask('Redo your last answer more carefully: re-read the page, check each step (use cas where useful), and correct anything wrong.', { tier: up, selection: this.board.selection, origin: 'think-harder button' });
+        },
+      });
+    }
+    return actions;
   }
 
   async putTextOnBoard(text) {
