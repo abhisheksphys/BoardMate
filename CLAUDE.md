@@ -19,10 +19,15 @@ A personal handwriting whiteboard. Claude watches the page (images), listens (sp
 - `js/cas.js` — SymPy via Pyodide.
 - `js/voice.js` — speech in/out, barge-in.
 - `js/panel.js` — chat panel, Markdown + LaTeX rendering, docking.
+- `js/costs.js` — prices, per-call cost from token usage, daily/monthly totals, budget check.
+- `js/claude.js` — API client with prompt-cache breakpoints; every call records its cost.
 - `js/settings.js` — all settings + defaults; `AI_EDITABLE` lists what Claude may change at runtime.
 - `js/settingsUI.js` — settings dialog generated from a field list.
 - `js/library.js` — PDF library (pdf.js), search, page rendering.
 - `js/changes.js`, `js/codeagent.js`, `js/github.js` — self-update loop. Keep the approval step intact.
+
+## Cost
+Keep cost low: default to the fast model, keep the cached prefix (tools, system prompt, compacted history) stable, send small images, and pass `purpose` to `claude()` so the meter can attribute spending.
 
 ## Conventions
 - New behaviour should be configurable through `settings.js` where reasonable, with a field in `settingsUI.js`.

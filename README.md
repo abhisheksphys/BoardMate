@@ -30,7 +30,15 @@ A handwriting whiteboard for iPad where Claude watches the page, listens, answer
 
 ## Running costs
 
-You pay Anthropic per use. *Live* mode costs the most because the watcher looks after each pause in your writing; raise *Seconds between looks* or use *Quiet live* / *On demand* to spend less.
+You pay Anthropic per use, from prepaid credits. The app is built to keep this low:
+
+- **Fast model first.** Haiku answers by default and hands a question to Sonnet (or Opus) only when it needs real reasoning. Each answer has a *Think harder* button if you want a stronger model to redo it.
+- **Prompt caching.** Instructions, tools and the conversation so far are cached, so follow-ups and tool steps are billed at a small fraction.
+- **Cheap watching.** The watcher looks only after you pause, at just the changed region plus its notes. Suspected errors are re-checked by Sonnet, not Opus.
+- **Smaller images and short history.** Page images are capped at 1100 px. Old turns drop their images, and the conversation resets after 20 idle minutes.
+- **Cost meter and budget.** The panel header shows today's spending (tap it for a breakdown), each answer shows its cost, and watching pauses when the daily budget is reached (default $1).
+
+All of these are adjustable in Settings → Claude, Attention and Cost.
 
 ## Not in this version (ask the app to add them)
 
