@@ -5,13 +5,26 @@ const KEY = 'live-board-settings';
 
 export const DEFAULTS = {
   apiKey: '',
-  models: { watch: 'claude-haiku-5-5', main: 'claude-sonnet-5-5', deep: 'claude-opus-5-5' },
+  // fast = default for answers and watching; main/deep = used only when a question needs them.
+  models: { fast: 'claude-haiku-5-5', main: 'claude-sonnet-5-5', deep: 'claude-opus-5-5' },
+  routing: 'auto', // auto (fast, hands off when needed) | main | deep
 
   // Perception
   attention: 'quiet', // live | quiet | demand
-  watchIntervalSec: 4,
-  escalate: true, // re-check suspected errors with the deep model
+  watchIdleSec: 6, // Live: look once you have paused this long
+  quietIdleSec: 20, // Quiet live: look once you have paused this long
+  watchMaxWaitSec: 60, // look at least this often while you keep writing
+  escalate: true, // re-check suspected errors with the main model
   liveSpeak: false, // speak live comments aloud
+
+  // Cost control
+  dailyBudgetUSD: 1, // 0 = no limit; when reached, watching pauses (answers still work)
+  currencySymbol: '₹',
+  currencyRate: 100, // local currency per US dollar, for display only (0 = show dollars)
+  imageMaxPx: 1100, // longest side of page images sent to Claude
+  maxHistory: 6, // past questions kept in the conversation
+  idleResetMin: 20, // start a fresh conversation after this long without questions
+  longCache: true, // keep cached context for 1 hour instead of 5 minutes
 
   // Voice
   voiceIn: 'push', // off | push | continuous
@@ -33,6 +46,10 @@ export const DEFAULTS = {
 
   // Panel
   panelPosition: 'right', // right | left | bottom | float | hidden
+  panelWidth: 380, // px, when docked left or right
+  panelHeight: 300, // px, when docked at the bottom
+  floatWidth: 360, // px, floating panel
+  floatHeight: 560,
 
   // Personalisation
   customInstructions: [],
@@ -49,10 +66,10 @@ export const DEFAULTS = {
 
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
-  'attention', 'watchIntervalSec', 'escalate', 'liveSpeak',
+  'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'liveSpeak',
   'voiceIn', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiColor', 'penColor', 'penWidth', 'fingerDraws', 'showMarks',
-  'panelPosition', 'customInstructions',
+  'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);

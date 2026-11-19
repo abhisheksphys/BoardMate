@@ -48,8 +48,114 @@ export class Panel {
     document.getElementById('panelPos').addEventListener('change', (e) => setSettings({ panelPosition: e.target.value }));
     document.getElementById('clearChat').addEventListener('click', () => { this.list.innerHTML = ''; this.onAction?.('clear-chat'); });
     this.initFloatDrag();
+    this.initSplitter();
+    this.initFloatGrip();
+    window.addEventListener('resize', () => this.applySize());
     this.renderActions();
     this.applyPosition();
+  }
+
+  // ---------- resizing the panel / board split ----------
+  // Keeps the board at least 240 px and the panel at least 220 px, whatever the screen size.
+  limits() {
+    const st = document.getElementById('stage').getBoundingClientRect();
+    const floating = settings.panelPosition === 'float';
+    const left = floating ? this.el.offsetLeft || 0 : 0;
+    const top = floating ? this.el.offsetTop || 0 : 0;
+    return {
+      w: [220, Math.max(220, st.width - 240)],
+      h: [140, Math.max(140, st.height - 200)],
+      // a floating panel never grows past the screen edge
+      fw: [260, Math.max(260, st.width - left - 8)],
+      fh: [220, Math.max(220, st.height - top - 8)],
+    };
+  }
+
+  applySize() {
+    const L = this.limits();
+    const clamp = (v, [lo, hi]) => Math.round(Math.max(lo, Math.min(hi, v)));
+    const root = document.documentElement.style;
+    root.setProperty('--panel-w', clamp(settings.panelWidth, L.w) + 'px');
+    root.setProperty('--panel-h', clamp(settings.panelHeight, L.h) + 'px');
+    root.setProperty('--float-w', clamp(settings.floatWidth, L.fw) + 'px');
+    root.setProperty('--float-h', clamp(settings.floatHeight, L.fh) + 'px');
+  }
+
+  initSplitter() {
+    const sp = document.getElementById('splitter');
+    const stage = document.getElementById('stage');
+    let drag = null;
+    const sizeFrom = (e) => {
+      const r = stage.getBoundingClientRect();
+      const pos = settings.panelPosition;
+      if (pos === 'bottom') return { key: 'panelHeight', v: r.bottom - e.clientY };
+      if (pos === 'left') return { key: 'panelWidth', v: e.clientX - r.left };
+      return { key: 'panelWidth', v: r.right - e.clientX };
+    };
+    sp.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      sp.setPointerCapture(e.pointerId);
+      drag = true;
+      sp.classList.add('dragging');
+      document.body.classList.add('resizing');
+      document.body.style.cursor = settings.panelPosition === 'bottom' ? 'row-resize' : 'col-resize';
+    });
+    sp.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const { key, v } = sizeFrom(e);
+      settings[key] = v;
+      this.applySize();
+    });
+    const end = () => {
+      if (!drag) return;
+      drag = null;
+      sp.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      document.body.style.cursor = '';
+      const L = this.limits();
+      settings.panelWidth = Math.max(L.w[0], Math.min(L.w[1], Math.round(settings.panelWidth)));
+      settings.panelHeight = Math.max(L.h[0], Math.min(L.h[1], Math.round(settings.panelHeight)));
+      setSettings({});
+    };
+    sp.addEventListener('pointerup', end);
+    sp.addEventListener('pointercancel', end);
+    sp.addEventListener('dblclick', () => setSettings({ panelWidth: 380, panelHeight: 300 }));
+    sp.addEventListener('keydown', (e) => {
+      const bottom = settings.panelPosition === 'bottom';
+      const grow = settings.panelPosition === 'left' ? 'ArrowRight' : bottom ? 'ArrowUp' : 'ArrowLeft';
+      const shrink = settings.panelPosition === 'left' ? 'ArrowLeft' : bottom ? 'ArrowDown' : 'ArrowRight';
+      const key = bottom ? 'panelHeight' : 'panelWidth';
+      if (e.key === grow) setSettings({ [key]: settings[key] + 24 });
+      else if (e.key === shrink) setSettings({ [key]: settings[key] - 24 });
+    });
+  }
+
+  initFloatGrip() {
+    const g = document.getElementById('floatGrip');
+    let start = null;
+    g.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      g.setPointerCapture(e.pointerId);
+      start = { x: e.clientX, y: e.clientY, w: this.el.offsetWidth, h: this.el.offsetHeight };
+      document.body.classList.add('resizing');
+    });
+    g.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      settings.floatWidth = start.w + e.clientX - start.x;
+      settings.floatHeight = start.h + e.clientY - start.y;
+      this.applySize();
+    });
+    const end = () => {
+      if (!start) return;
+      start = null;
+      document.body.classList.remove('resizing');
+      settings.floatWidth = this.el.offsetWidth;
+      settings.floatHeight = this.el.offsetHeight;
+      setSettings({});
+    };
+    g.addEventListener('pointerup', end);
+    g.addEventListener('pointercancel', end);
   }
 
   send() {
@@ -83,6 +189,14 @@ export class Panel {
     this.typeset(body);
     this.scroll();
     return el;
+  }
+
+  footer(el, text) {
+    if (!el) return;
+    const f = document.createElement('div');
+    f.className = 'cost-line';
+    f.textContent = text;
+    el.append(f);
   }
 
   addImage(src, caption, actions) {
@@ -148,10 +262,14 @@ export class Panel {
     document.body.classList.remove('panel-right', 'panel-left', 'panel-bottom', 'panel-float', 'panel-hidden');
     document.body.classList.add(`panel-${pos}`);
     document.getElementById('panelPos').value = pos;
+    this.applySize();
     if (pos === 'float') {
       const p = JSON.parse(localStorage.getItem('live-board-float') || '{"x":null,"y":null}');
-      this.el.style.left = (p.x ?? window.innerWidth - 400) + 'px';
-      this.el.style.top = (p.y ?? 80) + 'px';
+      const w = Math.min(settings.floatWidth, window.innerWidth - 16);
+      const x = Math.max(8, Math.min(p.x ?? window.innerWidth - w - 24, window.innerWidth - w - 8));
+      this.el.style.left = x + 'px';
+      this.el.style.top = Math.max(8, p.y ?? 40) + 'px';
+      this.applySize();
     } else {
       this.el.style.left = '';
       this.el.style.top = '';
