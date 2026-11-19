@@ -175,6 +175,10 @@ export class Board {
   bindInput() {
     const c = this.c;
     c.style.touchAction = 'none';
+    // Stop iOS from claiming Pencil/finger touches for its own gestures (scroll, zoom, text magnifier),
+    // which makes Safari cancel or drop quick strokes. Pointer events still arrive normally.
+    const block = (e) => { if (e.cancelable) e.preventDefault(); };
+    for (const t of ['touchstart', 'touchmove', 'touchend']) c.addEventListener(t, block, { passive: false });
     c.addEventListener('pointerdown', (e) => this.onDown(e));
     c.addEventListener('pointermove', (e) => this.onMove(e));
     c.addEventListener('pointerup', (e) => this.onUp(e, false));
@@ -204,7 +208,12 @@ export class Board {
       }
       this.touches.delete(e.pointerId); // single finger drawing
     }
-    if (this.drawing) return;
+    if (this.drawing) {
+      // The previous stroke's pen-up never arrived (it happens with very fast writing):
+      // keep that stroke and start the new one, instead of ignoring the new one.
+      if (this.drawing.stroke) this.finishStroke(this.drawing);
+      else return;
+    }
     try { this.c.setPointerCapture(e.pointerId); } catch {}
     const p = this.evtPos(e);
     const w = this.toWorld(p.sx, p.sy);
@@ -241,10 +250,8 @@ export class Board {
     for (const ev of evs.length ? evs : [e]) {
       const p = this.evtPos(ev);
       const w = this.toWorld(p.sx, p.sy);
-      if (d.stroke) {
-        const last = d.stroke.points[d.stroke.points.length - 1];
-        if (Math.hypot(w.x - last[0], w.y - last[1]) > 0.6 / this.page.view.z) d.stroke.points.push([r1(w.x), r1(w.y), ev.pressure || 0.5]);
-      } else if (d.erase) this.eraseAt(w);
+      if (d.stroke) this.addPoint(d.stroke, w, ev.pressure);
+      else if (d.erase) this.eraseAt(w);
       else if (d.move) { d.move.x = d.from.x + w.x - d.start.x; d.move.y = d.from.y + w.y - d.start.y; }
       else if (d.sel) { d.sel.x1 = w.x; d.sel.y1 = w.y; }
     }
@@ -261,16 +268,18 @@ export class Board {
     }
     const d = this.drawing;
     if (!d || d.pointerId !== e.pointerId) return;
-    this.drawing = null;
-    if (cancelled && d.stroke) { this.render(); return; }
 
     if (d.stroke) {
-      const s = d.stroke;
-      if (s.points.length === 1) s.points.push([s.points[0][0] + 0.2, s.points[0][1] + 0.2, s.points[0][2]]);
-      this.page.strokes.push(s);
-      this.pushUndo({ add: { strokes: [s] } });
-      this.markDirty(strokeBBox(s));
-    } else if (d.erase) {
+      // A fast stroke can arrive as just pen-down + pen-up: the pen-up position is the stroke's end.
+      const p = this.evtPos(e);
+      this.addPoint(d.stroke, this.toWorld(p.sx, p.sy), e.pressure);
+      // If iOS cancelled the touch, keep whatever was drawn rather than dropping it.
+      if (cancelled && d.stroke.points.length < 2) { this.drawing = null; this.render(); return; }
+      this.finishStroke(d);
+      return;
+    }
+    this.drawing = null;
+    if (d.erase) {
       const r = d.removed;
       if (r.strokes.length || r.blocks.length || r.marks.length) {
         this.pushUndo({ remove: r });
@@ -289,6 +298,24 @@ export class Board {
       this.selection = big ? normRect(s.x0, s.y0, s.x1, s.y1) : null;
       emit('selection', this.selection);
     }
+    this.render();
+    this.saveSoon();
+  }
+
+  addPoint(s, w, pressure) {
+    const last = s.points[s.points.length - 1];
+    if (Math.hypot(w.x - last[0], w.y - last[1]) <= 0.6 / this.page.view.z) return;
+    // pen-up reports pressure 0; reuse the last pressure so the stroke end doesn't thin out
+    s.points.push([r1(w.x), r1(w.y), pressure > 0 ? pressure : last[2]]);
+  }
+
+  finishStroke(d) {
+    const s = d.stroke;
+    if (this.drawing === d) this.drawing = null;
+    if (s.points.length === 1) s.points.push([s.points[0][0] + 0.2, s.points[0][1] + 0.2, s.points[0][2]]);
+    this.page.strokes.push(s);
+    this.pushUndo({ add: { strokes: [s] } });
+    this.markDirty(strokeBBox(s));
     this.render();
     this.saveSoon();
   }
