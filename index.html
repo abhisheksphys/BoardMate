@@ -11,7 +11,7 @@
   <title>Live Board</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2026.11.21-0401">
+  <link rel="stylesheet" href="styles.css?v=2026.11.21-0424">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -23,9 +23,12 @@
   <script defer src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <!-- Shows any startup problem on screen instead of failing silently. -->
   <script>
+    // The first problem stays on screen (later ones are often only its consequences); with where it happened.
     window.showAppError = function (msg) {
       var bar = document.getElementById('errBar');
       if (!bar) { document.addEventListener('DOMContentLoaded', function () { window.showAppError(msg); }); return; }
+      if (!bar.hidden && window.__appErrors) { window.__appErrors++; bar.querySelector('span').textContent = window.__firstAppError + ' (+' + (window.__appErrors - 1) + ' more)'; return; }
+      window.__appErrors = 1; window.__firstAppError = msg;
       bar.querySelector('span').textContent = msg;
       bar.hidden = false;
     };
@@ -41,7 +44,9 @@
     window.addEventListener('unhandledrejection', function (e) {
       var r = e.reason;
       if (r && r.name === 'AbortError') return;
-      window.showAppError('Something went wrong: ' + ((r && r.message) || r));
+      var where = '';
+      try { var m = String((r && r.stack) || '').match(/\/js\/([\w.-]+\.js)[^:\s]*:(\d+)/); if (m) where = ' (' + m[1] + ':' + m[2] + ')'; } catch (x) {}
+      window.showAppError('Something went wrong: ' + ((r && r.message) || r) + where);
     });
     setTimeout(function () {
       if (!window.liveBoardReady) window.showAppError("The app hasn't finished starting. If Live Board is open in another Safari tab, close that tab; otherwise reload this page.");
@@ -139,37 +144,37 @@
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.21-0401",
-  "./js/app.js": "./js/app.js?v=2026.11.21-0401",
-  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0401",
-  "./js/backup.js": "./js/backup.js?v=2026.11.21-0401",
-  "./js/board.js": "./js/board.js?v=2026.11.21-0401",
-  "./js/bus.js": "./js/bus.js?v=2026.11.21-0401",
-  "./js/cas.js": "./js/cas.js?v=2026.11.21-0401",
-  "./js/changes.js": "./js/changes.js?v=2026.11.21-0401",
-  "./js/claude.js": "./js/claude.js?v=2026.11.21-0401",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0401",
-  "./js/costs.js": "./js/costs.js?v=2026.11.21-0401",
-  "./js/export.js": "./js/export.js?v=2026.11.21-0401",
-  "./js/github.js": "./js/github.js?v=2026.11.21-0401",
-  "./js/images.js": "./js/images.js?v=2026.11.21-0401",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0401",
-  "./js/library.js": "./js/library.js?v=2026.11.21-0401",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0401",
-  "./js/pages.js": "./js/pages.js?v=2026.11.21-0401",
-  "./js/panel.js": "./js/panel.js?v=2026.11.21-0401",
-  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0401",
-  "./js/perception.js": "./js/perception.js?v=2026.11.21-0401",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0401",
-  "./js/settings.js": "./js/settings.js?v=2026.11.21-0401",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0401",
-  "./js/storage.js": "./js/storage.js?v=2026.11.21-0401",
-  "./js/tools.js": "./js/tools.js?v=2026.11.21-0401",
-  "./js/version.js": "./js/version.js?v=2026.11.21-0401",
-  "./js/voice.js": "./js/voice.js?v=2026.11.21-0401"
+  "./js/agent.js": "./js/agent.js?v=2026.11.21-0424",
+  "./js/app.js": "./js/app.js?v=2026.11.21-0424",
+  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0424",
+  "./js/backup.js": "./js/backup.js?v=2026.11.21-0424",
+  "./js/board.js": "./js/board.js?v=2026.11.21-0424",
+  "./js/bus.js": "./js/bus.js?v=2026.11.21-0424",
+  "./js/cas.js": "./js/cas.js?v=2026.11.21-0424",
+  "./js/changes.js": "./js/changes.js?v=2026.11.21-0424",
+  "./js/claude.js": "./js/claude.js?v=2026.11.21-0424",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0424",
+  "./js/costs.js": "./js/costs.js?v=2026.11.21-0424",
+  "./js/export.js": "./js/export.js?v=2026.11.21-0424",
+  "./js/github.js": "./js/github.js?v=2026.11.21-0424",
+  "./js/images.js": "./js/images.js?v=2026.11.21-0424",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0424",
+  "./js/library.js": "./js/library.js?v=2026.11.21-0424",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0424",
+  "./js/pages.js": "./js/pages.js?v=2026.11.21-0424",
+  "./js/panel.js": "./js/panel.js?v=2026.11.21-0424",
+  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0424",
+  "./js/perception.js": "./js/perception.js?v=2026.11.21-0424",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0424",
+  "./js/settings.js": "./js/settings.js?v=2026.11.21-0424",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0424",
+  "./js/storage.js": "./js/storage.js?v=2026.11.21-0424",
+  "./js/tools.js": "./js/tools.js?v=2026.11.21-0424",
+  "./js/version.js": "./js/version.js?v=2026.11.21-0424",
+  "./js/voice.js": "./js/voice.js?v=2026.11.21-0424"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.21-0401"></script>
+  <script type="module" src="js/app.js?v=2026.11.21-0424"></script>
 </head>
 <body class="panel-right">
   <div id="errBar" role="alert" hidden><span></span><button type="button" onclick="location.reload()">Reload</button><button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true">✕</button></div>

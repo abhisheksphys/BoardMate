@@ -152,7 +152,7 @@ export class Sessions {
 
   async save({ snapshot = false } = {}) {
     clearTimeout(this.saveTimer);
-    if (!this.currentId || !this.meta) return;
+    if (!this.currentId || !this.meta || !this.board.page) return;
     const id = this.currentId, meta = this.meta;
     if (this.contentChanged || snapshot) {
       const empty = this.isEmpty();

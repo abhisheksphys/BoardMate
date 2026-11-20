@@ -242,7 +242,28 @@ export class Board {
     this.bindInput();
   }
 
-  get page() { return this.pages[this.pi]; }
+  // (safety net: if the page index ever points past the end, e.g. after a session switch, use the nearest page)
+  get page() {
+    const p = this.pages[this.pi];
+    if (p || !this.pages.length) return p;
+    this.pi = Math.max(0, Math.min(this.pi | 0, this.pages.length - 1));
+    return this.pages[this.pi];
+  }
+
+  // Runs fn with page p as the board's page for a moment, synchronously (nothing else can run in between),
+  // then switches back to whatever page was showing. Lay the page's blocks out first (layoutPage).
+  withPageSync(p, fn) {
+    const showing = this.page;
+    const i = this.pages.indexOf(p);
+    if (i < 0) return null;
+    this.pi = i;
+    try { return fn(p); }
+    finally { const k = this.pages.indexOf(showing); this.pi = k >= 0 ? k : Math.max(0, Math.min(this.pi, this.pages.length - 1)); }
+  }
+
+  async layoutPage(p) {
+    await Promise.all((p?.blocks || []).map((b) => (this.layouts.has(b.id) ? null : this.layoutBlock(b))));
+  }
 
   newPage(name) {
     const p = { id: uid(), name: name || `Page ${this.pages.length + 1}`, paper: this.layout?.paper || this.sessionPaper || settings.paper, strokes: [], blocks: [], marks: [], notebook: [], view: { ox: 40, oy: 40, z: 1 } };
@@ -371,10 +392,8 @@ export class Board {
     this.thumbs ||= new Map();
     const hit = this.thumbs.get(p.id);
     if (hit?.stamp === stamp) return hit.url;
-    const keep = this.pi;
-    this.pi = i;
-    try {
-      await Promise.all(this.page.blocks.map((b) => (this.layouts.has(b.id) ? null : this.layoutBlock(b))));
+    await this.layoutPage(p);
+    return this.withPageSync(p, () => {
       let bb;
       if (this.layout) bb = this.pageRect();
       else {
@@ -404,9 +423,7 @@ export class Board {
       catch { this.noImageBlocks = true; paint(); this.noImageBlocks = false; url = cv.toDataURL('image/jpeg', 0.8); }
       this.thumbs.set(p.id, { stamp, url });
       return url;
-    } finally {
-      this.pi = keep;
-    }
+    });
   }
 
   // ---------- geometry ----------
@@ -442,6 +459,7 @@ export class Board {
   }
 
   contentBounds() {
+    if (!this.page) return null;
     let bb = null;
     for (const s of this.page.strokes) bb = union(bb, strokeBBox(s));
     for (const b of this.page.blocks) bb = union(bb, { x: b.x, y: b.y, w: b.w || 200, h: b.h || 40 });
@@ -558,15 +576,10 @@ export class Board {
 
   // An image of another page (for Claude), without showing it: its blocks are laid out first.
   async pageSnapshot(i, opts = {}) {
-    await this.bgReady(this.pages[i]);
-    const keep = this.pi;
-    this.pi = i;
-    try {
-      await Promise.all(this.page.blocks.map((b) => (this.layouts.has(b.id) ? null : this.layoutBlock(b))));
-      return { snap: this.snapshot(opts), page: this.page };
-    } finally {
-      this.pi = keep;
-    }
+    const p = this.pages[i];
+    await this.bgReady(p);
+    await this.layoutPage(p);
+    return this.withPageSync(p, () => ({ snap: this.snapshot(opts), page: p }));
   }
 
   // Keeps something Claude wrote (or a picture) on the page; writing that no longer fits continues on the next page.

@@ -40,15 +40,9 @@ const safeName = (t) => String(t || 'Live Board').replace(/[\\/:*?"<>|]+/g, ' ')
 
 // Runs fn with page i as the board's page (without showing it), its blocks laid out, then switches back.
 async function withPage(board, i, fn) {
-  const keep = board.pi;
-  board.pi = i;
-  try {
-    await Promise.all(board.page.blocks.map((b) => (board.layouts.has(b.id) ? null : board.layoutBlock(b))));
-    return await fn(board.page);
-  } finally {
-    board.pi = keep;
-    board.prepareBlocks();
-  }
+  const p = board.pages[i];
+  await board.layoutPage(p);
+  return await board.withPageSync(p, fn); // the page is swapped in only while fn runs synchronously
 }
 
 // Only your ink and Claude's blocks (no PDF page, no paper) on a transparent background, the size of the page: PNG bytes.
