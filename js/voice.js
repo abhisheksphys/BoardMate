@@ -26,13 +26,7 @@ class Voice {
   watch() {
     if (!this.want || !this.supported) return;
     const now = Date.now();
-    if (this.pausedForSpeech) {
-      // waiting for Claude's voice to finish: resume if it has actually stopped
-      if (this.isSpeaking()) { this.quietSince = 0; return; }
-      this.quietSince ||= now;
-      if (now - this.quietSince > 1500) { this.debug('speech output ended without notice: listening again'); this.pausedForSpeech = false; this.quietSince = 0; this.startRec('watchdog: speech output ended without notice'); }
-      return;
-    }
+    if (this.mutedSpeech) this.isMuted(); // notices speech output that ended without telling us
     if (!this.listening) {
       if (now - this.lastStartAttempt > 2500) { this.debug('mic was meant to be on but was not listening: restarting'); this.startRec('watchdog: not listening'); }
       return;
@@ -72,7 +66,7 @@ class Voice {
       `standalone (home-screen app): ${window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches}`,
       `recogniser: ${window.SpeechRecognition ? 'SpeechRecognition' : window.webkitSpeechRecognition ? 'webkitSpeechRecognition' : 'none'}`,
       `settings: ${conf}`,
-      `state now: listening=${this.listening} ready=${!!this.ready} want=${this.want} pausedForSpeech=${this.pausedForSpeech} speaking=${this.isSpeaking()}`,
+      `state now: listening=${this.listening} ready=${!!this.ready} want=${this.want} ignoringWhileClaudeSpeaks=${this.isMuted()} speaking=${this.isSpeaking()}`,
       '',
       ...(this.events || ['(no events yet)']),
     ].join('\n');
@@ -148,11 +142,15 @@ class Voice {
       if (!mine()) return;
       this.lastActivity = Date.now();
       ready('hearing you');
-      if (this.isSpeaking()) this.cancelSpeech(); // barge-in: you talk, it stops
       // Rebuild from the whole result list each time: Safari re-sends and re-marks earlier words,
       // so appending piece by piece duplicates or drops them.
       this.lastResults = [];
       for (let i = 0; i < e.results.length; i++) this.lastResults.push({ t: e.results[i][0].transcript, final: e.results[i].isFinal });
+      if (this.isMuted()) {
+        // With headphones the mic can't hear Claude, so speaking means you want to interrupt it.
+        if (settings.headphones && this.isSpeaking()) this.cancelSpeech();
+        else { this.debug('ignored while Claude speaks'); return; } // most likely Claude's own voice
+      }
       const text = this.lastResults.map((x) => x.t).join(' ').replace(/\s+/g, ' ').trim();
       this.debug('heard: ' + text);
       let fresh;
@@ -357,8 +355,7 @@ class Voice {
     this.unlocked = true;
     const u = new SpeechSynthesisUtterance(' ');
     u.volume = 0;
-    // playing audio can switch iOS out of recording mode: start a fresh listening run afterwards
-    u.onend = () => { this.log('app: unlock sound finished'); if (this.want && this.listening) this.freshRun('unlock sound'); };
+    u.onend = () => this.log('app: unlock sound finished');
     speechSynthesis.speak(u);
   }
 
@@ -380,12 +377,10 @@ class Voice {
     if (v) u.voice = v;
     u.lang = v?.lang || navigator.language || 'en-US';
     u.onstart = () => {
-      // Without headphones the mic would hear the AI, so pause listening while it talks.
-      if (!settings.headphones && this.listening && this.want) {
-        this.pausedForSpeech = true;
-        this.stopRec('pausing while Claude speaks');
-      }
-      this.log('app: Claude speaking', `"${String(text).slice(0, 40)}"`);
+      // Listening keeps running (stopping and restarting it is what leaves iPad Safari deaf).
+      // Instead, whatever the mic picks up while Claude talks is ignored: it is mostly Claude's own voice.
+      this.mutedSpeech = true;
+      this.log('app: Claude speaking (listening continues, words ignored)', `"${String(text).slice(0, 40)}"`);
       emit('speaking', true);
     };
     const done = () => {
@@ -393,10 +388,7 @@ class Voice {
         if (speechSynthesis.speaking) return;
         emit('speaking', false);
         this.log('app: Claude finished speaking');
-        if (this.pausedForSpeech) {
-          this.pausedForSpeech = false;
-          if (this.want) this.startRec('Claude finished speaking');
-        } else if (this.want && this.listening) this.freshRun('spoken reply finished'); // with headphones: listening may have been knocked out
+        this.endMute();
       }, 50);
     };
     u.onend = done;
@@ -412,10 +404,41 @@ class Voice {
     if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
     emit('speaking', false);
-    if (this.pausedForSpeech) {
-      this.pausedForSpeech = false;
-      if (this.want) this.startRec('speech cancelled');
+    this.endMute(0);
+  }
+
+  // Still ignoring the mic? (while Claude talks, and a moment after, for the echo of its last words)
+  isMuted() {
+    if (this.mutedSpeech) {
+      // iOS sometimes never reports that speaking finished: stop ignoring the mic once it is actually quiet
+      if (this.isSpeaking()) this.quietSince = 0;
+      else {
+        this.quietSince ||= Date.now();
+        if (Date.now() - this.quietSince > 700) {
+          this.quietSince = 0;
+          this.log('app: speech output ended without notice');
+          emit('speaking', false);
+          this.endMute(0);
+        }
+      }
     }
+    return !!this.mutedSpeech || Date.now() < (this.muteUntil || 0);
+  }
+
+  // Claude stopped talking: ignore the mic a little longer, then mark everything heard so far as used,
+  // so Claude's own words never turn up in your next message.
+  endMute(tailMs = 800) {
+    if (!this.mutedSpeech) return;
+    this.mutedSpeech = false;
+    this.muteUntil = Date.now() + tailMs;
+    clearTimeout(this.muteTimer);
+    const markUsed = () => {
+      if (this.listening && !settings.voiceFreshRuns) this.consumed('Claude finished speaking');
+      else if (this.listening) this.freshRun('Claude finished speaking');
+      this.runText = ''; this.lastShown = '';
+    };
+    if (tailMs > 0) this.muteTimer = setTimeout(markUsed, tailMs);
+    else markUsed();
   }
 }
 

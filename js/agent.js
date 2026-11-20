@@ -64,7 +64,18 @@ function compactBlock(b) {
   }
   return b;
 }
-const compactExchange = (ex) => ex.map((m) => ({ ...m, content: Array.isArray(m.content) ? m.content.map(compactBlock) : m.content }));
+// Claude's reasoning ("thinking") blocks are signed against the exact conversation before them. Once an
+// earlier turn is shortened (images dropped, history trimmed) they no longer match and the API rejects the
+// request, so they are removed from finished turns. Only the turn in progress needs them.
+const isThinking = (b) => b && (b.type === 'thinking' || b.type === 'redacted_thinking');
+function dropThinking(ex) {
+  return ex.map((m) => {
+    if (m.role !== 'assistant' || !Array.isArray(m.content) || !m.content.some(isThinking)) return m;
+    const content = m.content.filter((b) => !isThinking(b));
+    return { ...m, content: content.length ? content : [{ type: 'text', text: '(no reply text)' }] };
+  });
+}
+const compactExchange = (ex) => dropThinking(ex).map((m) => ({ ...m, content: Array.isArray(m.content) ? m.content.map(compactBlock) : m.content }));
 
 export class Agent {
   constructor({ board, panel, voice, changes }) {
@@ -96,8 +107,10 @@ export class Agent {
   messages() {
     const out = [];
     let historyEnd = -1;
+    const last = this.exchanges.length - 1;
     this.exchanges.forEach((ex, i) => {
-      for (const m of ex) {
+      // finished turns never carry reasoning blocks (also cleans histories saved by older versions)
+      for (const m of i === last ? ex : dropThinking(ex)) {
         const prev = out[out.length - 1];
         if (prev && prev.role === 'user' && m.role === 'user') prev.content = [...prev.content, ...m.content];
         else out.push({ role: m.role, content: Array.isArray(m.content) ? m.content.slice() : m.content });
@@ -165,17 +178,28 @@ export class Agent {
         tiersUsed.add(this.tier);
         this.panel.status(`Thinking (${TIER_NAMES[this.tier]})…`);
         const { messages, historyEnd } = this.messages();
-        const resp = await claude({
+        const call = (msgs, end) => claude({
           model: settings.models[this.tier] || settings.models.main,
           system: systemPrompt(),
-          messages,
+          messages: msgs,
           tools: TOOL_SCHEMAS,
           max_tokens: this.tier === 'fast' ? 2048 : 4096,
           signal: this.abort.signal,
           purpose: 'answer',
-          cacheAt: historyEnd >= 0 ? [historyEnd] : [],
+          cacheAt: end >= 0 ? [end] : [],
           cacheLast: true,
         });
+        let resp;
+        try {
+          resp = await call(messages, historyEnd);
+        } catch (e) {
+          // Safety net: if the API still objects to a reasoning block, retry once without any of them.
+          if (!/thinking/i.test(e.message || '')) throw e;
+          ex.splice(0, ex.length, ...dropThinking(ex));
+          this.exchanges = this.exchanges.map((x) => (x === ex ? x : dropThinking(x)));
+          const again = this.messages();
+          resp = await call(again.messages, again.historyEnd);
+        }
         cost += resp._cost || 0;
         ex.push({ role: 'assistant', content: resp.content });
         const t = textOf(resp);
