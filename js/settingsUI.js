@@ -127,6 +127,11 @@ export class SettingsUI {
             <div class="buttons"><button type="button" id="testVoice">Test voice</button><button type="button" id="copyVoiceLog">Copy voice log</button><button type="button" id="clearVoiceLog" class="ghost">Clear log</button></div>
             <div id="voiceLogMsg" class="muted small"></div>
           </fieldset>
+          <fieldset><legend>Watching log</legend>
+            <div class="muted">What Live / Quiet live did: when it looked at your writing, and what came back (notes, marks, comments, board requests) or why it didn't look.</div>
+            <div class="buttons"><button type="button" id="copyWatchLog">Copy watching log</button><button type="button" id="clearWatchLog" class="ghost">Clear log</button></div>
+            <div id="watchLogMsg" class="muted small"></div>
+          </fieldset>
           <fieldset><legend>Saved action buttons</legend><div id="savedList"></div></fieldset>
           <fieldset><legend>Shared library (PDFs every session can use)</legend><div class="muted">PDFs for just one session go in that session's 📎 materials, in the Claude panel.</div>
             <div id="bookList" class="list"></div>
@@ -224,6 +229,20 @@ export class SettingsUI {
         ta.focus(); ta.select();
       }
     });
+    d.querySelector('#copyWatchLog').addEventListener('click', async () => {
+      const w = window.liveWatcher;
+      const text = w ? w.report() : 'Watching has not started.';
+      const msg = d.querySelector('#watchLogMsg');
+      try { await navigator.clipboard.writeText(text); msg.textContent = `Copied (${w?.events.length || 0} entries). Paste it into your chat with Claude.`; }
+      catch {
+        msg.innerHTML = '';
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.rows = 8; ta.style.width = '100%';
+        msg.append('Copying was blocked. Select all of this and copy it:', ta);
+        ta.focus(); ta.select();
+      }
+    });
+    d.querySelector('#clearWatchLog').addEventListener('click', () => { if (window.liveWatcher) window.liveWatcher.events = []; d.querySelector('#watchLogMsg').textContent = 'Log cleared.'; });
     d.querySelector('#clearVoiceLog').addEventListener('click', () => { this.voice.clearLog(); d.querySelector('#voiceLogMsg').textContent = 'Log cleared. Now reproduce the problem, then copy the log.'; });
     d.querySelector('#pdfInput').addEventListener('change', async (e) => {
       const prog = d.querySelector('#pdfProgress');

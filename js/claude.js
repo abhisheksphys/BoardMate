@@ -62,9 +62,24 @@ export function parseJSON(text) {
   if (!m) return null;
   try {
     return JSON.parse(m[0]);
+  } catch {}
+  // LaTeX inside JSON often comes with single backslashes ("\partial", "\mu", "\frac"), which JSON rejects
+  // or silently turns into control characters. Escape those backslashes and try again.
+  try {
+    return JSON.parse(fixLatexEscapes(m[0]));
   } catch {
     return null;
   }
+}
+
+// Keeps valid JSON escapes (\\ \" \/ \uXXXX, and \n \t ... when not followed by a letter);
+// every other backslash, e.g. \partial, \frac, \nabla, \theta, becomes a literal backslash.
+export function fixLatexEscapes(json) {
+  return json.replace(/\\(\\|["\/bfnrt]|u[0-9a-fA-F]{4})?/g, (all, esc, offset, str) => {
+    if (esc === '\\' || esc === '"' || esc === '/' || (esc && esc[0] === 'u')) return all;
+    if (esc && !/[a-zA-Z]/.test(str[offset + 2] || '')) return all; // a real \n, \t ...
+    return '\\\\' + (esc || '');
+  });
 }
 
 export const imageBlock = (snap) => ({

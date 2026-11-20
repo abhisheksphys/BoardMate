@@ -26,12 +26,18 @@ Rules:
 const VERIFY_SYSTEM = `You double-check suspected mistakes on a scientist's handwritten page. Given the image, the notes about the rest of the page, and the suspected issues, keep only real issues (fix their notes if needed). Reply with ONE JSON object:
 {"issues":[{"x":0,"y":0,"kind":"error|warn|ok","note":"..."}],"comment":null or "...","spoken":null or "..."}`;
 
+// LaTeX that came through JSON with single backslashes: "\nabla" arrives as a newline + "abla", "\frac"
+// as a form feed + "rac", and so on. Put the backslashes back.
+const fixLatex = (s) => String(s || '').replace(/\n(?=[a-zA-Z])/g, '\\n').replace(/\t(?=[a-zA-Z])/g, '\\t').replace(/\r(?=[a-zA-Z])/g, '\\r').replace(/\f/g, '\\f').replace(/\x08/g, '\\b');
+
 export class Perception {
   constructor({ board, panel, voice, agent }) {
     this.board = board;
     this.panel = panel;
     this.voice = voice;
     this.agent = agent;
+    this.events = [];
+    window.liveWatcher = this;
     this.pending = null;
     this.firstPendingAt = 0;
     this.running = false;
@@ -39,10 +45,34 @@ export class Perception {
     on('page', () => { this.pending = null; clearTimeout(this.timer); });
   }
 
+  // ---- activity log (Settings → Watching log) ----
+  log(msg) {
+    const t = new Date().toTimeString().slice(0, 8);
+    const last = this.events[this.events.length - 1];
+    if (last && last.msg === msg) { last.n++; last.t2 = t; return; }
+    this.events.push({ t, msg, n: 1 });
+    if (this.events.length > 300) this.events.splice(0, 60);
+  }
+
+  report() {
+    const s = settings;
+    return [
+      'Live Board watching log',
+      `when: ${new Date().toString()}`,
+      `settings: mode=${s.attention} liveLookAfter=${s.watchIdleSec}s quietLookAfter=${s.quietIdleSec}s lookAtLeastEvery=${s.watchMaxWaitSec}s boardRequests=${s.boardRequests} escalate=${s.escalate} model=${s.models.fast} apiKey=${s.apiKey ? 'set' : 'MISSING'}`,
+      `state: looking=${!!this.running} waiting=${!!this.pending} claudeAnswering=${!!this.agent.busy} notesOnThisPage=${this.board.page.notebook.length}`,
+      '',
+      ...this.events.map((e) => `${e.t}  ${e.msg}${e.n > 1 ? `   (×${e.n}, last ${e.t2})` : ''}`),
+    ].join('\n');
+  }
+
   onSettled(bb) {
-    if (settings.attention === 'demand' || !settings.apiKey) return;
+    if (settings.attention === 'demand') return this.log('page changed: not looking (mode is On demand)');
+    if (!settings.apiKey) return this.log('page changed: not looking (no API key)');
     if (!this.pending) this.firstPendingAt = Date.now();
     this.pending = union(this.pending, bb);
+    const idle = settings.attention === 'live' ? settings.watchIdleSec : settings.quietIdleSec;
+    this.log(`page changed: will look after ${idle} s without new changes`);
     this.schedule();
   }
 
@@ -59,11 +89,12 @@ export class Perception {
 
   async run() {
     if (!this.pending || settings.attention === 'demand') return;
-    if (this.running || this.agent.busy) return this.schedule(1500);
+    if (this.running || this.agent.busy) { this.log(this.running ? 'waiting: previous look still running' : 'waiting: Claude is answering a question'); return this.schedule(1500); }
     if (overBudget()) {
       if (!this.budgetNoted) {
         this.budgetNoted = true;
         this.panel.add('info', `Today's budget (${fmt(settings.dailyBudgetUSD)}) is used up, so live watching is paused until tomorrow. You can still ask questions.`);
+        this.log('not looking: daily budget used up');
       }
       this.pending = null;
       return;
@@ -85,15 +116,25 @@ export class Perception {
         type: 'text',
         text: `${content.length > 1 ? 'Image 2 is a small overview of the whole page (for notes only; give coordinates in image 1). ' : ''}Notes about the page so far: ${this.notesText()}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.`,
       });
+      this.log(`looking (${live ? 'Live' : 'Quiet live'}): changed area ${Math.round(dirty.w)}×${Math.round(dirty.h)}${content.length > 2 ? ' + page overview' : ''}`);
+      this.panel.status('Claude is looking at your writing…');
+      const t0 = Date.now();
       const resp = await claude({
         model: settings.models.fast,
         system: WATCH_SYSTEM,
         messages: [{ role: 'user', content }],
-        max_tokens: 1200,
+        max_tokens: 4000, // room for the model's own reasoning as well as the JSON (only what is used is paid for)
         purpose: 'watch',
       });
-      const j = parseJSON(textOf(resp));
-      if (!j || b.page.id !== pageId) return;
+      const raw = textOf(resp);
+      const j = parseJSON(raw);
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      if (!j) {
+        this.log(`could not read Claude's reply after ${secs} s (stop: ${resp.stop_reason}): ${raw.slice(0, 300) || '(no text)'}`);
+        if (!this.failNoted) { this.failNoted = true; this.panel.add('info', 'Live watching could not read one of Claude\'s looks at the page. Details: Settings → Watching log.'); }
+        return;
+      }
+      if (b.page.id !== pageId) return this.log('reply arrived after you switched pages: ignored');
 
       const nb = b.page.notebook;
       for (const k of j.notebook_remove || []) {
@@ -103,13 +144,16 @@ export class Perception {
       for (const e of j.notebook_upsert || []) {
         if (!e || !e.latex) continue;
         const w = Number.isFinite(e.x) && Number.isFinite(e.y) ? b.imageToWorld(crop, e.x, e.y) : {};
-        const entry = { key: String(e.key || e.latex.slice(0, 20)), latex: e.latex, description: e.description || '', x: w.x, y: w.y };
+        const latex = fixLatex(e.latex);
+        const entry = { key: String(e.key || latex.slice(0, 20)), latex, description: e.description || '', x: w.x, y: w.y };
         const i = nb.findIndex((x) => x.key === entry.key);
         if (i >= 0) nb[i] = entry; else nb.push(entry);
       }
       b.saveSoon();
 
-      for (const r of Array.isArray(j.board_requests) ? j.board_requests : []) this.takeRequest(r, crop, region);
+      const reqs = Array.isArray(j.board_requests) ? j.board_requests : [];
+      this.log(`reply after ${secs} s: ${(j.notebook_upsert || []).length} note(s) updated, ${(j.issues || []).length} mark(s), comment ${j.comment ? 'yes' : 'no'}, ${reqs.length} board request(s)${reqs.length ? ': ' + reqs.map((r) => `"${r.text}"`).join(', ') : ''}${resp.stop_reason === 'max_tokens' ? ' (reply was cut off)' : ''}`);
+      for (const r of reqs) this.takeRequest(r, crop, region);
 
       if (!live) return;
       let issues = Array.isArray(j.issues) ? j.issues : [];
@@ -134,9 +178,11 @@ export class Perception {
         if (settings.liveSpeak && settings.voiceOut && !this.agent.busy) this.voice.speak(spoken || comment.replace(/\$+/g, ''));
       }
     } catch (e) {
+      this.log('error: ' + (e.message || e));
       this.panel.status('Watcher: ' + (e.message || e));
       setTimeout(() => this.panel.status(''), 5000);
     } finally {
+      if (!this.agent.busy) this.panel.status(''); // clear "looking…" unless an answer's own status is showing
       this.running = false;
       if (this.pending) this.schedule();
     }
@@ -158,11 +204,12 @@ export class Perception {
     const words = (t) => new Set(String(t).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean));
     const similar = (t1, t2) => { const A = words(t1), B = words(t2); let n = 0; for (const w of A) if (B.has(w)) n++; return n >= 0.6 * Math.min(A.size, B.size); };
     const overlaps = (p, q) => p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h;
-    if (handled.some((h) => overlaps(h, rect) && similar(h.text, text))) return;
+    if (handled.some((h) => overlaps(h, rect) && similar(h.text, text))) return this.log(`board request "${text}": already done, skipped`);
     handled.push({ text, ...rect });
     if (handled.length > 100) handled.splice(0, handled.length - 100);
     b.saveSoon();
     this.panel.add('user', `✍ From the board: ${text}`);
+    this.log(`board request "${text}": running it`);
     this.agent.ask(
       `I wrote this request on the board (it is inside the selection rectangle): "${text}". Do what it asks. ` +
         'If the result is something to write (equations, a derivation, a list), write it on the board with write_on_canvas ' +
