@@ -11,7 +11,7 @@
   <title>Live Board</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2026.11.21-0259">
+  <link rel="stylesheet" href="styles.css?v=2026.11.21-0335">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -139,36 +139,37 @@
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.21-0259",
-  "./js/app.js": "./js/app.js?v=2026.11.21-0259",
-  "./js/backup.js": "./js/backup.js?v=2026.11.21-0259",
-  "./js/board.js": "./js/board.js?v=2026.11.21-0259",
-  "./js/bus.js": "./js/bus.js?v=2026.11.21-0259",
-  "./js/cas.js": "./js/cas.js?v=2026.11.21-0259",
-  "./js/changes.js": "./js/changes.js?v=2026.11.21-0259",
-  "./js/claude.js": "./js/claude.js?v=2026.11.21-0259",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0259",
-  "./js/costs.js": "./js/costs.js?v=2026.11.21-0259",
-  "./js/export.js": "./js/export.js?v=2026.11.21-0259",
-  "./js/github.js": "./js/github.js?v=2026.11.21-0259",
-  "./js/images.js": "./js/images.js?v=2026.11.21-0259",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0259",
-  "./js/library.js": "./js/library.js?v=2026.11.21-0259",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0259",
-  "./js/pages.js": "./js/pages.js?v=2026.11.21-0259",
-  "./js/panel.js": "./js/panel.js?v=2026.11.21-0259",
-  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0259",
-  "./js/perception.js": "./js/perception.js?v=2026.11.21-0259",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0259",
-  "./js/settings.js": "./js/settings.js?v=2026.11.21-0259",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0259",
-  "./js/storage.js": "./js/storage.js?v=2026.11.21-0259",
-  "./js/tools.js": "./js/tools.js?v=2026.11.21-0259",
-  "./js/version.js": "./js/version.js?v=2026.11.21-0259",
-  "./js/voice.js": "./js/voice.js?v=2026.11.21-0259"
+  "./js/agent.js": "./js/agent.js?v=2026.11.21-0335",
+  "./js/app.js": "./js/app.js?v=2026.11.21-0335",
+  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0335",
+  "./js/backup.js": "./js/backup.js?v=2026.11.21-0335",
+  "./js/board.js": "./js/board.js?v=2026.11.21-0335",
+  "./js/bus.js": "./js/bus.js?v=2026.11.21-0335",
+  "./js/cas.js": "./js/cas.js?v=2026.11.21-0335",
+  "./js/changes.js": "./js/changes.js?v=2026.11.21-0335",
+  "./js/claude.js": "./js/claude.js?v=2026.11.21-0335",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0335",
+  "./js/costs.js": "./js/costs.js?v=2026.11.21-0335",
+  "./js/export.js": "./js/export.js?v=2026.11.21-0335",
+  "./js/github.js": "./js/github.js?v=2026.11.21-0335",
+  "./js/images.js": "./js/images.js?v=2026.11.21-0335",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0335",
+  "./js/library.js": "./js/library.js?v=2026.11.21-0335",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0335",
+  "./js/pages.js": "./js/pages.js?v=2026.11.21-0335",
+  "./js/panel.js": "./js/panel.js?v=2026.11.21-0335",
+  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0335",
+  "./js/perception.js": "./js/perception.js?v=2026.11.21-0335",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0335",
+  "./js/settings.js": "./js/settings.js?v=2026.11.21-0335",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0335",
+  "./js/storage.js": "./js/storage.js?v=2026.11.21-0335",
+  "./js/tools.js": "./js/tools.js?v=2026.11.21-0335",
+  "./js/version.js": "./js/version.js?v=2026.11.21-0335",
+  "./js/voice.js": "./js/voice.js?v=2026.11.21-0335"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.21-0259"></script>
+  <script type="module" src="js/app.js?v=2026.11.21-0335"></script>
 </head>
 <body class="panel-right">
   <div id="errBar" role="alert" hidden><span></span><button type="button" onclick="location.reload()">Reload</button><button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true">✕</button></div>
@@ -221,6 +222,7 @@
         <option value="quiet">Quiet live</option>
         <option value="demand">On demand</option>
       </select>
+      <button id="awarenessBtn" class="toggle awareness" type="button" aria-label="Awareness: Normal or Deep"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="6.5" class="deep-ring"/></svg></button>
       <button id="micBtn" class="mic" aria-label="Microphone"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
       <button id="voiceOutBtn" class="toggle" title="Spoken replies" aria-label="Spoken replies"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
       <button id="panelBtn" title="Move or hide the panel" aria-label="Panel layout"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>

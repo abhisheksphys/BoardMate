@@ -564,31 +564,54 @@ export class Board {
   async keepOnPage(b) {
     if (!this.layout || !b) return null;
     const s = this.pageSize(), m = PAGE_INSET;
+    if (b.kind !== 'image' && !b.maxW) { this.fitToArea(b); this.layouts.delete(b.id); await this.layoutBlock(b); }
     if ((b.w || 0) > s.w - 2 * m) await this.scaleBlock(b.id, (s.w - 2 * m) / b.w);
     b.x = clamp(b.x, m, Math.max(m, s.w - m - (b.w || 0)));
     b.y = Math.max(m, b.y);
-    if (b.y + (b.h || 0) <= s.h - m || b.kind === 'image' || (b.h || 0) > s.h - 2 * m) {
+    if (b.y + (b.h || 0) <= s.h - m || b.kind === 'image') {
       b.y = Math.min(b.y, Math.max(m, s.h - m - (b.h || 0)));
       this.render();
       this.saveSoon();
       return null;
     }
+    // Too long for what is left of the page: the lines that fit stay here, the rest continues at the top of the
+    // next page (a new blank page when there is none, or when the next one is a PDF page), page after page.
+    const lay = this.layouts.get(b.id);
+    const avail = s.h - m - b.y;
+    let fit = 0;
+    if (lay && b.lines?.length > 1) {
+      for (let k = 1; k <= b.lines.length; k++) {
+        const its = lay.items.filter((it) => it.li !== undefined && it.li < k);
+        const bottom = its.length ? Math.max(...its.map((it) => it.y + it.h)) : 0;
+        if (bottom <= avail) fit = k; else break;
+      }
+    }
+    if (!fit && b.y <= m + 4) fit = 1; // even one line is taller than a page: keep it here rather than loop
     const from = this.pi;
-    this.page.blocks.splice(this.page.blocks.indexOf(b), 1);
+    let rest = null;
+    if (fit && fit < (b.lines?.length || 0)) {
+      rest = { ...b, id: uid(), lines: b.lines.slice(fit) };
+      delete rest.w; delete rest.h;
+      b.lines = b.lines.slice(0, fit);
+      this.layouts.delete(b.id);
+      await this.layoutBlock(b);
+    } else if (fit) { this.render(); this.saveSoon(); return null; }
+    else { rest = b; this.page.blocks.splice(this.page.blocks.indexOf(b), 1); }
     this.render();
-    // continues on the next page; never on top of a PDF page's print: then a blank page is put in after this one
     if (from + 1 >= this.pages.length) this.newPage();
     else if (this.pages[from + 1].bg) { const np = this.newPage(); this.pages.pop(); this.pages.splice(from + 1, 0, np); this.renumber(); emit('changed'); }
     const next = this.pages[from + 1];
     let bottom = m;
     for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + 20); }
     for (const x of next.blocks) bottom = Math.max(bottom, x.y + (x.h || 0) + 20);
-    b.y = bottom;
-    next.blocks.push(b);
+    rest.y = bottom;
+    next.blocks.push(rest);
     this.goto(from + 1);
-    this.markDirty({ x: b.x, y: b.y, w: b.w || 0, h: b.h || 0 }, { ai: b.author !== 'user' });
+    if (rest !== b) { await this.layoutBlock(rest); this.pushUndo({ add: { blocks: [rest] } }); }
+    this.markDirty({ x: rest.x, y: rest.y, w: rest.w || 0, h: rest.h || 0 }, { ai: rest.author !== 'user' });
     this.saveSoon();
-    return { page: from + 1 };
+    const more = await this.keepOnPage(rest); // it may need yet another page
+    return { page: more?.page ?? from + 1 };
   }
 
   ensureVisible(rect) {
@@ -709,7 +732,7 @@ export class Board {
       const a = this.activeBlock;
       if (a && this.page.blocks.includes(a) && this.hitHandle(a, w, e.pointerType === 'touch')) {
         // drag the corner handle to resize (keeps proportions); Claude's blocks get a new letter size on release
-        this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h, fontPx: a.fontPx, strokePx: a.strokePx }, start: w };
+        this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h, fontPx: a.fontPx, strokePx: a.strokePx, maxW: a.maxW }, start: w };
       } else {
         const b = this.hitBlock(w, e.pointerType === 'touch');
         this.activeBlock = b;
@@ -894,11 +917,12 @@ export class Board {
         if (b.kind !== 'image') {
           // Claude's text and maths: typeset again at the new size (stays sharp), not stretched
           b.fontPx = (d.from.fontPx || 22) * d.k;
+          if (b.maxW) b.maxW *= d.k; // same line breaks, just bigger or smaller
           if (d.from.strokePx) b.strokePx = d.from.strokePx * d.k;
           this.layouts.delete(b.id);
           this.layoutBlock(b).then(() => { this.render(); this.saveSoon(); });
         }
-        this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx, strokePx: b.strokePx } } });
+        this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx, strokePx: b.strokePx, maxW: b.maxW } } });
         this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h }, { ai: b.author !== 'user' });
       } else Object.assign(b, { w: d.from.w, h: d.from.h });
     } else if (d.sel) {
@@ -1320,22 +1344,72 @@ export class Board {
     const gap = fontPx * 0.45;
     const items = [];
     let y = 0, w = 0;
-    for (const line of b.lines) {
+    // Claude's writing stays inside the page / the visible board: long lines wrap at b.maxW (whole words; inline
+    // maths is never cut), display maths wider than that is scaled down to fit.
+    const maxW = b.maxW > 0 ? b.maxW : Infinity;
+    const opts = (size) => ({ color: b.color, fontPx: size, strokePx: b.strokePx || 0 });
+    const measure = (t, size, bold) => { this.ctx.font = `${bold ? '650 ' : ''}${size}px ${FONT}`; return this.ctx.measureText(t).width; };
+    const pushImg = (im, li) => {
+      let iw = im.w, ih = im.h;
+      if (iw > maxW) { const k = Math.max(0.5, maxW / iw); iw *= k; ih *= k; }
+      items.push({ img: im.img, x: 0, y, w: iw, h: ih, li });
+      y += ih + gap;
+      w = Math.max(w, iw);
+    };
+    const pushText = (text, size, bold, li) => {
+      const tw = measure(text, size, bold);
+      items.push({ text, x: 0, y, w: tw, h: size * 1.3, fontPx: size, bold, li });
+      y += size * 1.3 + gap;
+      w = Math.max(w, tw);
+    };
+    for (const [li, raw] of b.lines.entries()) {
+      let line = String(raw);
+      // "# Heading" / "## Subheading": bigger and bold, with a little space above; "- item" becomes a bullet
+      let size = fontPx, bold = false;
+      const hm = line.match(/^\s*(#{1,3})\s+(.*)$/);
+      if (hm) {
+        size = fontPx * (hm[1].length === 1 ? 1.35 : hm[1].length === 2 ? 1.18 : 1.06);
+        bold = true;
+        line = hm[2];
+        if (li) y += fontPx * 0.55;
+      }
+      line = line.replace(/^\s*[-*•]\s+/, '• ').replace(/\*\*([^*]+)\*\*/g, '$1');
       const L = lineToTex(line);
-      let im = null;
-      if (!L.plain) im = await texToImage(L.tex, { color: b.color, display: L.display, fontPx, strokePx: b.strokePx || 0 });
-      if (im?.error) im = null; // broken LaTeX: shown as text (never as a solid block)
-      if (im) {
-        items.push({ img: im.img, x: 0, y, w: im.w, h: im.h });
-        y += im.h + gap;
-        w = Math.max(w, im.w);
-      } else {
-        const text = L.plain ? L.text : String(line);
-        this.ctx.font = `${fontPx}px ${FONT}`;
-        const tw = this.ctx.measureText(text).width;
-        items.push({ text, x: 0, y, w: tw, h: fontPx * 1.3, fontPx });
-        y += fontPx * 1.3 + gap;
-        w = Math.max(w, tw);
+      if (L.display) {
+        const im = await texToImage(L.tex, { ...opts(size), display: true });
+        if (im && !im.error) { pushImg(im, li); continue; }
+        // shown as text (maths not available): smaller if needed, so it still fits
+        const tw = measure(line, size, bold);
+        pushText(line, tw > maxW ? Math.max(size * 0.5, (size * maxW) / tw) : size, bold, li);
+        continue;
+      }
+      // a line that fits as it is
+      const whole = L.plain ? null : await texToImage(L.tex, { ...opts(size), display: false });
+      const fits = L.plain ? measure(L.text, size, bold) <= maxW : whole && !whole.error && whole.w <= maxW;
+      if (fits) { if (L.plain) pushText(L.text, size, bold, li); else pushImg(whole, li); continue; }
+      // too wide: break into pieces (words, and each $...$ kept whole) and fill lines up to maxW
+      const tokens = [];
+      for (const part of line.split(/(\$[^$]+\$)/g).filter(Boolean)) {
+        if (part.length > 1 && part.startsWith('$') && part.endsWith('$')) tokens.push(part);
+        else tokens.push(...(part.match(/\S+\s*|\s+/g) || []));
+      }
+      const widthOf = async (t) => {
+        if (t.startsWith('$') && t.endsWith('$') && t.length > 1) { const im = await texToImage(t.slice(1, -1), { ...opts(size), display: false }); return im && !im.error ? im.w : measure(t, size, bold); }
+        return measure(t, size, bold);
+      };
+      const rows = [];
+      let cur = '', curW = 0;
+      for (const t of tokens) {
+        const tw = await widthOf(t);
+        if (cur && curW + tw > maxW) { rows.push(cur); cur = t.trimStart(); curW = await widthOf(cur); }
+        else { cur += t; curW += tw; }
+      }
+      if (cur.trim()) rows.push(cur);
+      for (const r of rows) {
+        const R = lineToTex(r.trim());
+        if (R.plain) { pushText(R.text, size, bold, li); continue; }
+        const im = await texToImage(R.tex, { ...opts(size), display: false });
+        if (im && !im.error) pushImg(im, li); else pushText(r.trim(), size, bold, li);
       }
     }
     const lay = { items, w, h: Math.max(fontPx, y - gap) };
@@ -1350,8 +1424,27 @@ export class Board {
     for (const b of this.page.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
   }
 
+  // Where Claude may write: a notebook page minus its margins; on a freeform page, the part of the board you can
+  // see now (e.g. half the screen when the panel takes the other half), minus a margin.
+  writeArea() {
+    if (this.layout) { const s = this.pageSize(); return { left: PAGE_INSET, right: s.w - PAGE_INSET }; }
+    const vis = this.visibleWorld(), m = 28 / this.page.view.z;
+    return { left: vis.x + m, right: vis.x + vis.w - m };
+  }
+
+  // Fits a block's position and wrap width into the write area (keeps at least ~half the area's width to write in).
+  fitToArea(b) {
+    const { left, right } = this.writeArea();
+    const full = Math.max(80, right - left);
+    b.x = Math.max(left, b.x);
+    let maxW = right - b.x;
+    if (maxW < full * 0.5) { maxW = full * 0.5; b.x = Math.max(left, right - maxW); }
+    b.maxW = maxW;
+  }
+
   async addBlock({ lines = [], x, y, kind = 'math', src, w, h, fontPx = 22, color, strokePx = 0 }, { animateMs = 0, signal, author = 'ai' } = {}) {
     const b = { id: uid(), kind, x, y, lines: [], color: color || settings.aiColor, fontPx, strokePx, author, src, w, h };
+    if (kind !== 'image') this.fitToArea(b);
     this.page.blocks.push(b);
     if (kind === 'math' && animateMs > 0 && lines.length > 1) {
       for (const ln of lines) {
@@ -1811,7 +1904,7 @@ export class Board {
         try { ctx.drawImage(it.img, b.x + it.x, b.y + it.y, it.w, it.h); } catch {}
       } else {
         ctx.fillStyle = b.color;
-        ctx.font = `${it.fontPx}px ${FONT}`;
+        ctx.font = `${it.bold ? '650 ' : ''}${it.fontPx}px ${FONT}`;
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, b.x + it.x, b.y + it.y + it.fontPx * 0.1);
         const extra = (b.strokePx || 0) - it.fontPx * 0.075; // thicker than the font's own lines: outline the letters too

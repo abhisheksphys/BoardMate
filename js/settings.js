@@ -8,6 +8,7 @@ export const DEFAULTS = {
   // fast = default for answers and watching; main/deep = used only when a question needs them.
   models: { fast: 'claude-haiku-5-5', main: 'claude-sonnet-5-5', deep: 'claude-opus-5-5' },
   routing: 'auto', // auto (fast, hands off when needed) | main | deep
+  awareness: 'normal', // normal | deep (more looks at other parts of the page, step-back looks in pauses)
   markTap: 'board', // tapping a ✗ / ! mark: board = Claude writes what is wrong and the fix next to the line | panel = the note in the panel
   answerDepth: 'auto', // auto (as much as the question needs) | brief | detailed
   webSearch: true, // let Claude search the web in answers (never while watching)
@@ -95,7 +96,7 @@ export const DEFAULTS = {
 
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
-  'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'markTap', 'quietLowEffort', 'liveSpeak',
+  'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'markTap', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',

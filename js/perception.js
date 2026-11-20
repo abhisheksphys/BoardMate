@@ -8,21 +8,45 @@ import { on, emit, union } from './bus.js';
 import { claude, textOf, parseJSON, imageBlock } from './claude.js';
 import { overBudget, fmt } from './costs.js';
 import { textIn } from './pdfbg.js';
+import { DEEP, extraAreasAllowed, mapOf, mapForPrompt, applyMap, recentConversation, remarksOf, addRemark, dismissedOf, noteDismissed } from './awareness.js';
 
-const WATCH_SYSTEM = `You silently watch a scientist's handwritten whiteboard page. You get an image of the region that just changed (with a little context above it) and your notes about the rest of the page. Reply with ONE JSON object and nothing else:
+const WATCH_SYSTEM = `You watch a scientist's handwritten whiteboard page like a knowledgeable colleague standing beside them: you follow the work as a whole, not just the pen. You get an image of the region that just changed (with a little context above it), your notes on the page's equations, your map of the page, the recent conversation, and remarks you already made. Reply with ONE JSON object and nothing else:
 {"notebook_upsert":[{"key":"short-id","latex":"...","description":"a few words","x":0,"y":0}],
  "notebook_remove":[],
- "issues":[{"x":0,"y":0,"kind":"error|warn|ok","note":"one short sentence"}],
+ "map":{"goal":null,"areas":[{"id":"a1","name":"...","purpose":"...","uses":["a0"],"x0":0,"y0":0,"x1":0,"y1":0}],"remove":[],"open":null},
+ "look_also":[],
+ "issues":[{"x":0,"y":0,"kind":"error|warn|ok","note":"one short sentence","urgency":"now|pause|ask"}],
  "comment":null,
+ "comment_urgency":"now|pause|ask",
  "spoken":null,
  "board_requests":[{"text":"...","x0":0,"y0":0,"x1":0,"y1":0}]}
 Rules:
 - notebook_upsert: equations or expressions visible in the image that are new or changed. Reuse an existing key when it is the same equation. x,y = left end of the equation in pixels of THIS image. notebook_remove: keys of notes whose equation was erased in this region.
-- QUIET mode: issues [] and comment null.
-- LIVE mode: check the newest work against the earlier lines and your notes. Flag real mistakes (algebra, signs, indices, factors, dimensions, misapplied identities) as "error", doubtful steps as "warn". Use "ok" sparingly. Put each mark just right of its line (pixels in this image).
-- comment: one or two sentences only when worth saying now; otherwise null. spoken: the same for speech, math in words, or null.
+- map (both modes): your picture of the whole page. Areas are parts of the work with a purpose (the setup, a derivation, a side calculation, a figure, a result). Add areas that appear, update ones that changed (box x0,y0,x1,y1 in pixels of image 1 when the area is in it; leave the box out otherwise), "uses" = ids of areas this one builds on. goal = what the user seems to be working towards (or null if unchanged). open = the list of unresolved points or doubts on the page, or null if unchanged. Send only what changed; {} when nothing did. At most about 12 areas.
+- look_also (LIVE only): ids of map areas that are NOT in image 1 and that you must SEE before you can judge the new work (e.g. the new line uses a result, definition or sign convention from there and your notes don't settle it). You will be shown them and asked once more; still give your best answer now. Usually [].
+- QUIET mode: issues [] and comment null (keep the notes and the map current).
+- LIVE mode: check the newest work against the earlier lines, the areas it uses, your notes and the goal. Flag real mistakes (algebra, signs, indices, factors, dimensions, misapplied identities, inconsistency with another area) as "error", doubtful steps as "warn". Use "ok" sparingly. Put each mark just right of its line (pixels in this image).
+- urgency, like a colleague choosing when to speak: "now" = an error the following lines will build on, or something the user clearly needs before going on; "pause" = doubtful steps, a better route, a consistency remark: can wait until they stop writing; "ask" = minor, only worth saying if they ask. Don't repeat a remark already made (listed), and never raise again anything like a remark the user dismissed.
+- comment: one or two sentences only when worth saying; otherwise null. spoken: the same for speech, math in words, or null.
 - board_requests (both modes): an instruction or question the user has handwritten FOR THE ASSISTANT in the new writing, e.g. "Write down the Lagrangian of the Standard Model", "derive this", "what comes next?", "Claude: check line 3". text = the words as written (fix obvious spelling); x0,y0,x1,y1 = the box around those words in pixels of THIS image. Only when the sentence looks finished. Not requests: titles, headings, notes to self, and problem statements the user is solving on the page themselves (e.g. "Q2. Show that ..." followed by their own working). Usually [].
+- Marks the user draws are pointing, like a gesture: a "?" written next to something (alone, not part of maths) is a question about it: add a board_request with text like "The user put a ? next to <what>: explain or check it", box around the ? and its target. In LIVE mode, a result the user just circled or boxed is something they care about: check it with extra care. An arrow from one thing to another means they are connected.
 - Never comment on neatness. Blue typeset blocks were written by the assistant. Be brief.`;
+
+const PAUSE_MS = 7000; // "at a pause" = this long without writing
+const STEP_IDLE_MS = 20000; // Deep: step back after this long without changes…
+const STEP_GAP_MS = 90000; // …at most this often
+
+const LOOK_AGAIN = 'Images 2 and after are the parts of the page you asked to see (names given). With them, give your final JSON for the new work in image 1 (all coordinates still in pixels of image 1). Do not ask for more areas (look_also: []).';
+
+// Deep awareness: in a pause, one look at the whole page by the strong model, like a colleague stepping back.
+const STEP_SYSTEM = `You are a knowledgeable colleague watching a scientist work on a handwritten whiteboard page. They have paused; you step back and look at the whole page. You get the whole page as an image, your notes, your map of the page, the recent conversation, and remarks already made. Reply with ONE JSON object:
+{"map":{"goal":null,"areas":[{"id":"a1","name":"...","purpose":"...","uses":[],"x0":0,"y0":0,"x1":0,"y1":0}],"remove":[],"open":null},
+ "issues":[{"x":0,"y":0,"kind":"error|warn","note":"one short sentence","urgency":"now|pause|ask"}],
+ "comment":null,"comment_urgency":"pause"}
+- map: bring your picture of the page up to date (boxes in pixels of this image; reuse ids; remove areas that are gone).
+- issues (only in LIVE mode, else []): only big-picture problems a line-by-line check misses: parts of the page that contradict each other, a change in one place that breaks what was built on it elsewhere, a result that doesn't fit the goal or a limit/symmetry/dimension check, a step that will lead them astray. Not small slips already marked, not remarks already made or dismissed. Usually []. Put each mark just right of the line it concerns.
+- comment: one or two sentences about the overall direction only if genuinely useful, else null.
+- Never comment on neatness. Blue typeset blocks were written by the assistant.`;
 
 const VERIFY_SYSTEM = `You double-check suspected mistakes on a scientist's handwritten page. Given the image, the notes about the rest of the page, and the suspected issues, keep only real issues (fix their notes if needed). Reply with ONE JSON object:
 {"issues":[{"x":0,"y":0,"kind":"error|warn|ok","note":"..."}],"comment":null or "...","spoken":null or "..."}`;
@@ -67,10 +91,13 @@ export class Perception {
     this.verified = new Map(); // line content -> the strong model's verdict on a suspected error there
     window.liveWatcher = this;
     this.pending = null;
+    this.stepped = new Map(); // page id -> what the page looked like at its last step back
     this.firstPendingAt = 0;
     this.running = false;
     on('settled', ({ bb, parts }) => this.onSettled(bb, parts));
-    on('page', () => { this.pending = null; clearTimeout(this.timer); });
+    on('page', () => { this.pending = null; clearTimeout(this.timer); this.held = []; clearTimeout(this.pauseTimer); clearTimeout(this.stepTimer); });
+    // any change: held remarks wait for the next pause; Deep awareness plans a step-back look
+    on('changed', () => { if (this.held?.length) this.armPause(); this.armStepBack(); });
   }
 
   // ---- activity log (Settings → Watching log) ----
@@ -110,6 +137,14 @@ export class Perception {
     const idle = (settings.attention === 'live' ? settings.watchIdleSec : settings.quietIdleSec) * 1000;
     const overdue = Date.now() - this.firstPendingAt > settings.watchMaxWaitSec * 1000;
     this.timer = setTimeout(() => this.run(), (overdue ? 300 : idle) + extraMs);
+  }
+
+  // what a colleague would also have in mind: the page map, the conversation, what was already said or dismissed
+  contextText(crop) {
+    const page = this.board.page;
+    const said = remarksOf(page).slice(-8).map((r) => r.text);
+    const dis = dismissedOf(page);
+    return `Map of the page: ${mapForPrompt(this.board, page, crop)}\nRecent conversation in the panel:\n${recentConversation(this.agent.sessions)}\nRemarks already made or held: ${said.length ? JSON.stringify(said) : 'none'}\nRemarks the user dismissed (never raise these or anything like them again): ${dis.length ? JSON.stringify(dis) : 'none'}`;
   }
 
   notesText() {
@@ -153,7 +188,7 @@ export class Perception {
       if (!b.page.notebook.length) content.push(imageBlock(b.snapshot({ maxDim: 700, maxScale: 1 })));
       content.push({
         type: 'text',
-        text: `${content.length > 1 ? 'Image 2 is a small overview of the whole page (for notes only; give coordinates in image 1). ' : ''}${b.page.bg ? `This page is a printed PDF page the user writes on: the print is context (e.g. the problem being worked); check and note only the user's handwriting. ${printed ? `Printed text in image 1 (exact):\n${printed}\n` : ''}` : ''}Notes about the page so far: ${this.notesText()}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.`,
+        text: `${content.length > 1 ? 'Image 2 is a small overview of the whole page (for notes only; give coordinates in image 1). ' : ''}${b.page.bg ? `This page is a printed PDF page the user writes on: the print is context (e.g. the problem being worked); check and note only the user's handwriting. ${printed ? `Printed text in image 1 (exact):\n${printed}\n` : ''}` : ''}Notes about the page so far: ${this.notesText()}\n${this.contextText(crop)}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.`,
       });
       const effort = !live && settings.quietLowEffort ? 'low' : undefined;
       this.log(`looking (${live ? 'Live' : 'Quiet live'}${effort ? ', low effort' : ''}): changed area ${Math.round(dirty.w)}×${Math.round(dirty.h)}${content.length > 2 ? ' + page overview' : ''}`);
@@ -190,10 +225,34 @@ export class Perception {
         const i = nb.findIndex((x) => x.key === entry.key);
         if (i >= 0) nb[i] = entry; else nb.push(entry);
       }
+      const mapped = applyMap(b, b.page, j.map, crop);
       b.saveSoon();
 
+      // Claude asked to see other parts of the page before judging (Normal: at most 1, Deep: up to 3)
+      const want = live && Array.isArray(j.look_also) ? j.look_also.map(String) : [];
+      if (want.length) {
+        const areas = mapOf(b.page).areas.filter((a) => want.includes(a.id)).slice(0, extraAreasAllowed());
+        if (areas.length && !overBudget()) {
+          this.log(`asked to see ${areas.map((a) => `"${a.name}"`).join(', ')} before judging: looking again with ${areas.length === 1 ? 'it' : 'them'}`);
+          const extra = areas.map((a) => imageBlock(b.snapshot({ region: { x: a.x - 20, y: a.y - 20, w: a.w + 40, h: a.h + 40 }, maxDim: 700, maxScale: 1.5, pad: 0 })));
+          const resp2 = await claude({
+            model: settings.models.fast,
+            system: WATCH_SYSTEM,
+            messages: [{ role: 'user', content: [content[0], ...extra, { type: 'text', text: `${content[content.length - 1].text}\n\n${LOOK_AGAIN} Areas shown: ${areas.map((a, i) => `image ${i + 2} = ${a.id} "${a.name}"`).join(', ')}.` }] }],
+            max_tokens: 4000,
+            purpose: 'watch',
+          });
+          const j2 = parseJSON(textOf(resp2));
+          if (j2 && b.page.id === pageId) {
+            for (const k of ['issues', 'comment', 'comment_urgency', 'spoken']) if (k in j2) j[k] = j2[k];
+            if (Array.isArray(j2.board_requests) && j2.board_requests.length) j.board_requests = j2.board_requests;
+            applyMap(b, b.page, j2.map, crop);
+          }
+        }
+      }
+
       const reqs = Array.isArray(j.board_requests) ? j.board_requests : [];
-      this.log(`reply after ${secs} s: ${(j.notebook_upsert || []).length} note(s) updated, ${(j.issues || []).length} mark(s), comment ${j.comment ? 'yes' : 'no'}, ${reqs.length} board request(s)${reqs.length ? ': ' + reqs.map((r) => `"${r.text}"`).join(', ') : ''}${resp.stop_reason === 'max_tokens' ? ' (reply was cut off)' : ''}`);
+      this.log(`reply after ${secs} s: ${(j.notebook_upsert || []).length} note(s) updated, ${mapped ? 'map updated, ' : ''}${(j.issues || []).length} mark(s), comment ${j.comment ? 'yes' : 'no'}, ${reqs.length} board request(s)${reqs.length ? ': ' + reqs.map((r) => `"${r.text}"`).join(', ') : ''}${resp.stop_reason === 'max_tokens' ? ' (reply was cut off)' : ''}`);
       for (const r of reqs) this.takeRequest(r, crop, region);
 
       if (!live) return;
@@ -221,7 +280,10 @@ export class Perception {
         } else {
           const v = await this.verify(crop, issues);
           if (v) {
+            const before = issues;
             issues = Array.isArray(v.issues) ? v.issues : issues;
+            // the double-check doesn't decide timing: keep the urgency of the nearest original remark
+            for (const i of issues) if (!i.urgency) { let best = null, bd = Infinity; for (const o of before) { const d = Math.hypot((o.x || 0) - (i.x || 0), (o.y || 0) - (i.y || 0)); if (d < bd) { bd = d; best = o; } } if (best?.urgency && bd < 80) i.urgency = best.urgency; }
             comment = v.comment ?? comment;
             spoken = v.spoken ?? spoken;
             const kept = issues.filter((i) => i.kind === 'error' || i.kind === 'warn');
@@ -239,37 +301,11 @@ export class Perception {
       // Replace this region's marks only; marks elsewhere on the page stay.
       const inRegion = (m) => m.x >= region.x && m.x <= region.x + region.w && m.y >= region.y && m.y <= region.y + region.h;
       const keep = b.page.marks.filter((m) => m.src === 'watch' && !inRegion(m));
-      const fresh = issues.filter((i) => Number.isFinite(i.x) && Number.isFinite(i.y)).map((i) => ({ ...b.imageToWorld(crop, i.x, i.y), kind: i.kind || 'note', note: i.note || '' }));
+      const fresh = issues.filter((i) => Number.isFinite(i.x) && Number.isFinite(i.y)).map((i) => ({ ...b.imageToWorld(crop, i.x, i.y), kind: i.kind || 'note', note: i.note || '', urgency: i.urgency }));
       b.replaceMarks('watch', [...keep.map(({ id, src, ...m }) => m), ...fresh]);
-      // Every new ✗ / ! gets its explanation in the panel, whether or not Claude also wrote a comment
-      // (before, the panel only showed the optional comment, so some marks came with no words at all).
-      // A mark already explained (same place, same note) is not repeated on later looks.
-      const said = (this.announced ||= new Set());
-      const keyOf = (m) => `${pageId}|${Math.round(m.y / 40)}|${String(m.note).toLowerCase().replace(/\W+/g, '').slice(0, 60)}`;
-      const news = fresh.filter((m) => (m.kind === 'error' || m.kind === 'warn') && m.note && !said.has(keyOf(m)));
-      news.forEach((m) => said.add(keyOf(m)));
-      if (said.size > 500) said.delete(said.values().next().value);
-      if (comment || news.length) {
-        const listed = news.filter((m) => !comment || !comment.toLowerCase().includes(String(m.note).toLowerCase().slice(0, 40)));
-        const text = [comment, ...listed.map((m) => `${m.kind === 'error' ? '✗' : '!'} ${m.note}`)].filter(Boolean).join('\n\n');
-        const liveMark = (m) => b.page.marks.find((x) => x.src === 'watch' && Math.abs(x.x - m.x) < 1 && Math.abs(x.y - m.y) < 1);
-        this.panel.add('commentary', text, {
-          actions: [
-            ...(news.length ? [{ label: news.length > 1 ? 'Write the fixes on the page' : 'Write the fix on the page', run: () => news.forEach((m) => { const lm = liveMark(m); if (lm) this.agent.explainMark(lm); }) }] : []),
-            // Dismiss: the message goes away (also from the session's saved chat), and so do its marks on the page
-            { label: 'Dismiss', run: (btn) => {
-              // its marks: the same notes (a later look may have redrawn them in a slightly different place)
-              const notes = new Set(news.map((m) => m.note));
-              const gone = new Set(b.page.marks.filter((x) => x.src === 'watch' && notes.has(x.note)));
-              if (gone.size) { b.page.marks = b.page.marks.filter((x) => !gone.has(x)); b.render(); b.saveSoon(); }
-              btn?.closest('.msg')?.remove();
-              emit('panel-dismiss', { role: 'commentary', md: text });
-            } },
-          ],
-        });
-        if (settings.liveSpeak && settings.voiceOut && !this.agent.busy) this.voice.speak(spoken || text.replace(/\$+/g, '').replace(/[✗!] /g, ''));
-        this.log(`panel: ${comment ? 'comment' : ''}${comment && listed.length ? ' + ' : ''}${listed.length ? `${listed.length} mark explanation(s)` : ''}`);
-      } else if (fresh.some((m) => m.kind === 'error' || m.kind === 'warn')) this.log('marks already explained in the panel earlier: not repeated');
+      // What to say, and when: "now" at once, "pause" when you stop writing, "ask" kept for when you ask.
+      // Every new ✗ / ! gets words (not only the optional comment); nothing already said is repeated.
+      this.deliver({ pageId, comment, commentUrgency: j.comment_urgency, spoken, marks: fresh });
     } catch (e) {
       this.log('error: ' + (e.message || e));
       this.panel.status('Watcher: ' + (e.message || e));
@@ -282,6 +318,142 @@ export class Perception {
         else this.schedule();
       }
     }
+  }
+
+  // ---- Deep awareness: step back in a pause and look at the whole page (strong model) ----
+  armStepBack() {
+    clearTimeout(this.stepTimer);
+    if (!DEEP() || settings.attention === 'demand' || !settings.apiKey) return;
+    this.stepTimer = setTimeout(() => this.stepBack(), STEP_IDLE_MS);
+  }
+
+  pageStamp(page) {
+    const last = page.strokes[page.strokes.length - 1];
+    return `${page.id}|${page.strokes.length}|${last?.id || ''}|${page.blocks.length}`;
+  }
+
+  async stepBack() {
+    const b = this.board, page = b.page;
+    if (!DEEP() || settings.attention === 'demand' || !settings.apiKey) return;
+    if (this.running || this.agent.busy || this.pending?.length) { this.stepTimer = setTimeout(() => this.stepBack(), 4000); return; }
+    const stamp = this.pageStamp(page);
+    if (this.stepped.get(page.id) === stamp) return; // nothing new since the last step back on this page
+    if (!page.strokes.length || page.strokes.length < 6) return; // too little on the page to need it
+    if (Date.now() - (this.lastStep || 0) < STEP_GAP_MS) { this.stepTimer = setTimeout(() => this.stepBack(), STEP_GAP_MS - (Date.now() - this.lastStep) + 500); return; }
+    if (overBudget()) return this.log('step back: skipped (daily budget used up)');
+    this.running = true;
+    this.lastStep = Date.now();
+    this.stepped.set(page.id, stamp);
+    const live = settings.attention === 'live';
+    const pageId = page.id;
+    try {
+      if (page.bg) await b.bgReady(page, 1200);
+      const snap = b.snapshot({ maxDim: 1000, maxScale: 1, pad: 20 });
+      this.log(`stepping back: a look at the whole page (${settings.models.main}, Deep awareness)`);
+      this.panel.status('Claude is looking over the whole page…');
+      const resp = await claude({
+        model: settings.models.main,
+        system: STEP_SYSTEM,
+        messages: [{ role: 'user', content: [imageBlock(snap), { type: 'text', text: `Notes: ${this.notesText()}\n${this.contextText(snap)}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.` }] }],
+        max_tokens: 6000,
+        purpose: 'stepback',
+      });
+      const j = parseJSON(textOf(resp));
+      if (!j) return this.log('step back: could not read the reply');
+      if (b.page.id !== pageId) return;
+      const mapped = applyMap(b, b.page, j.map, snap);
+      const issues = live && Array.isArray(j.issues) ? j.issues.filter((i) => Number.isFinite(i.x) && Number.isFinite(i.y) && (i.kind === 'error' || i.kind === 'warn')) : [];
+      const marks = issues.map((i) => ({ ...b.imageToWorld(snap, i.x, i.y), kind: i.kind, note: i.note || '', urgency: i.urgency === 'ask' ? 'ask' : 'now' })); // it is a pause already
+      if (marks.length) b.replaceMarks('watch', [...b.page.marks.filter((m) => m.src === 'watch').map(({ id, src, ...m }) => m), ...marks]);
+      this.log(`step back: ${mapped ? 'map updated' : 'map unchanged'}, ${marks.length} big-picture remark(s)${j.comment ? ' + comment' : ''}`);
+      if (live) this.deliver({ pageId, comment: j.comment, commentUrgency: j.comment_urgency === 'ask' ? 'ask' : 'now', marks, header: marks.length || j.comment ? 'Looking over the whole page: ' : '' });
+      b.saveSoon();
+    } catch (e) {
+      this.log('step back: error: ' + (e.message || e));
+    } finally {
+      if (!this.agent.busy) this.panel.status('');
+      this.running = false;
+      if (this.pending?.length) this.schedule();
+    }
+  }
+
+  // ---- remarks and their timing ----
+  deliver({ pageId, comment, commentUrgency, spoken, marks, header = '' }) {
+    const b = this.board;
+    if (b.page.id !== pageId) return;
+    const said = (this.announced ||= new Set());
+    const keyOf = (m) => `${pageId}|${Math.round(m.y / 40)}|${String(m.note).toLowerCase().replace(/\W+/g, '').slice(0, 60)}`;
+    const news = marks.filter((m) => (m.kind === 'error' || m.kind === 'warn') && m.note && !said.has(keyOf(m)));
+    news.forEach((m) => said.add(keyOf(m)));
+    if (said.size > 500) said.delete(said.values().next().value);
+    const urg = (u, dflt) => (['now', 'pause', 'ask'].includes(u) ? u : dflt);
+    const items = news.map((m) => ({ text: `${m.kind === 'error' ? '✗' : '!'} ${m.note}`, note: m.note, mark: m, urgency: urg(m.urgency, m.kind === 'error' ? 'now' : 'pause') }));
+    if (comment) items.unshift({ text: String(comment), urgency: urg(commentUrgency, 'pause'), comment: true });
+    if (!items.length) {
+      if (marks.some((m) => m.kind === 'error' || m.kind === 'warn')) this.log('marks already explained in the panel earlier: not repeated');
+      return;
+    }
+    const page = b.page;
+    for (const it of items.filter((x) => x.urgency === 'ask')) addRemark(page, { text: it.text, urgency: 'ask', delivered: false });
+    const now = items.filter((x) => x.urgency === 'now');
+    const later = items.filter((x) => x.urgency === 'pause');
+    if (now.length) this.post(now, { header, spoken: now.some((x) => x.comment) ? spoken : null });
+    if (later.length) {
+      if (this.heldPage !== pageId) this.held = [];
+      this.heldPage = pageId;
+      (this.held ||= []).push(...later);
+      for (const it of later) addRemark(page, { text: it.text, urgency: 'pause', delivered: false, held: true });
+      this.armPause();
+    }
+    const asked = items.length - now.length - later.length;
+    this.log(`remarks: ${now.length} now${later.length ? `, ${later.length} held for a pause` : ''}${asked ? `, ${asked} kept for when asked` : ''}`);
+    b.saveSoon();
+  }
+
+  // held remarks come out once you have stopped writing for a few seconds
+  armPause() {
+    clearTimeout(this.pauseTimer);
+    if (!this.held?.length) return;
+    this.pauseTimer = setTimeout(() => this.flushHeld(), PAUSE_MS);
+  }
+
+  flushHeld() {
+    const b = this.board;
+    if (!this.held?.length || this.heldPage !== b.page.id) { this.held = []; return; }
+    if (this.running || this.agent.busy) { this.pauseTimer = setTimeout(() => this.flushHeld(), 2000); return; }
+    const items = this.held;
+    this.held = [];
+    for (const r of remarksOf(b.page)) if (r.held) delete r.held;
+    this.post(items, { header: 'While you paused: ' });
+    this.log(`pause: ${items.length} held remark(s) said`);
+  }
+
+  post(items, { header = '', spoken = null } = {}) {
+    const b = this.board, page = b.page;
+    const marks = items.filter((x) => x.mark).map((x) => x.mark);
+    const text = header + items.map((x) => x.text).join('\n\n');
+    for (const it of items) {
+      const r = remarksOf(page).find((x) => x.text === it.text && !x.delivered);
+      if (r) r.delivered = true; else addRemark(page, { text: it.text, urgency: it.urgency, delivered: true });
+    }
+    const liveMark = (m) => page.marks.find((x) => x.src === 'watch' && Math.abs(x.x - m.x) < 1 && Math.abs(x.y - m.y) < 1);
+    this.panel.add('commentary', text, {
+      actions: [
+        ...(marks.length ? [{ label: marks.length > 1 ? 'Write the fixes on the page' : 'Write the fix on the page', run: () => marks.forEach((m) => { const lm = liveMark(m); if (lm) this.agent.explainMark(lm); }) }] : []),
+        // Dismiss: the message goes away (also from the saved chat), its marks too, and Claude won't raise it again
+        { label: 'Dismiss', run: (btn) => {
+          const notes = new Set(marks.map((m) => m.note));
+          const gone = new Set(page.marks.filter((x) => x.src === 'watch' && notes.has(x.note)));
+          if (gone.size) { page.marks = page.marks.filter((x) => !gone.has(x)); b.render(); }
+          noteDismissed(page, items.map((x) => x.note || x.text));
+          b.saveSoon();
+          btn?.closest('.msg')?.remove();
+          emit('panel-dismiss', { role: 'commentary', md: text });
+        } },
+      ],
+    });
+    if (settings.liveSpeak && settings.voiceOut && !this.agent.busy) this.voice.speak(spoken || text.replace(/\$+/g, '').replace(/[✗!] /g, ''));
+    b.saveSoon();
   }
 
   // A request handwritten on the board: run it like a typed question, pointing at the handwriting
@@ -308,8 +480,8 @@ export class Perception {
     this.log(`board request "${text}": running it`);
     this.agent.ask(
       `I wrote this request on the board (it is inside the selection rectangle): "${text}". Do what it asks. ` +
-        'If the result is something to write (equations, a derivation, a list), write it on the board with write_on_canvas ' +
-        'using anchor "below_selection", and keep your panel reply to one short line. Otherwise answer in the panel.',
+        'If the result is something to write (an explanation, a derivation, equations, a list), write it on the board with write_on_canvas ' +
+        'using anchor "below_selection", as fully as the request needs (headings, explanations and every step, not terse fragments), and keep your panel reply to one short line. Otherwise answer in the panel.',
       { selection: rect, origin: 'board request' },
     );
   }

@@ -10,6 +10,7 @@ import { texErrors } from './mathrender.js';
 import { TOOL_SCHEMAS, runTool } from './tools.js';
 import { fmt, overBudget } from './costs.js';
 import { pageText } from './pdfbg.js';
+import { awarenessForQuestion } from './awareness.js';
 
 const MAX_STEPS = 14;
 
@@ -34,6 +35,26 @@ function answerText(resp) {
   if (seen.size) out = out.trim() + '\n\n**Sources:** ' + [...seen].map(([u, t]) => `[${t.replace(/[\[\]]/g, '')}](${u})`).join(' · ');
   return out.trim();
 }
+// A panel answer (Markdown) as board lines: headings and bullets kept, $$...$$ blocks joined into one line,
+// bold/code marks and the sources list dropped.
+export function mdToBoardLines(md) {
+  const out = [];
+  const src = String(md || '').replace(/\r/g, '').replace(/\*\*Sources:\*\*[\s\S]*$/, '');
+  const parts = src.split(/(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\])/g);
+  for (const part of parts) {
+    if (!part) continue;
+    if (/^(\$\$|\\\[)/.test(part)) { out.push(`$$${part.replace(/^\$\$|\$\$$|^\\\[|\\\]$/g, '').replace(/\s+/g, ' ').trim()}$$`); continue; }
+    for (let l of part.split('\n')) {
+      l = l.trim();
+      if (!l || /^(-{3,}|\*{3,})$/.test(l)) continue;
+      l = l.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/^>\s*/, '');
+      if (/^\*\s+/.test(l)) l = l.replace(/^\*\s+/, '- ');
+      out.push(l);
+    }
+  }
+  return out.slice(0, 150);
+}
+
 const TIER_NAMES = { fast: 'Haiku', main: 'Sonnet', deep: 'Opus' };
 const nextTier = (t) => (t === 'fast' ? 'main' : 'deep');
 
@@ -54,13 +75,15 @@ Understanding the board
 - Pictures on the page (figures, photos, screenshots, book pages) were pasted by the user; read them as part of the page.
 - The user's current selection (a box, or a freehand lasso outline) is given in board_context.selection, and a second image shows it close up; with a lasso, everything outside the outline is faded. "This" usually means what they selected.
 - board_context.recent_writing (when there is no selection): where the user was writing most recently and how long ago, in pixels of the first image, sometimes with a close-up as the second image. Unless the question names something else, "this", "here", "the last line", "what I just wrote" and an unspecific "is this right?" usually mean that area. It is a hint, not a limit: anything the question names elsewhere on the page wins.
+- board_context.board_map is your own running picture of this page, kept while watching: its areas (what each part is for, what builds on what, where it is in the first image), the user's apparent goal, open points, remarks you made while watching (said, held for a pause, or kept for when asked) and remarks the user dismissed. Use it to understand how the page fits together; when asked "anything else?" or "what do you think?", the remarks kept for later are what you noticed. Don't repeat dismissed remarks.
 - If something is too small or messy to read, call get_region for a sharper view.
 - Speech-to-text garbles math words ("curls" for curl, "dell" for del, "partial tea" for partial t); interpret charitably.
 
 Answering
 - Put full answers in your text reply, shown in the side panel. Use Markdown with LaTeX: $...$ inline, $$...$$ display.
 - For any symbolic computation (curl, divergence, expanding, simplifying, solving, integrating, series, checking equalities) use the cas tool rather than doing the algebra in your head; then explain.
-- When the user asks you to write, continue, fill in, or put something on the board, use write_on_canvas${s.allowBoardWrite ? '' : ' (currently turned off: say so and answer in the panel)'}. Place it next to what it relates to. Keep board content short: equations and brief labels.
+- When the user asks you to write, continue, fill in, or put something on the board, use write_on_canvas${s.allowBoardWrite ? '' : ' (currently turned off: say so and answer in the panel)'}. Place it next to what it relates to.
+- What you write on the board is held to the same depth as a panel answer (see Answer depth). When the user asks you to explain, teach, derive or answer something ON THE BOARD, write it the way a good teacher writes a full board: a "# Title", "## Section" headings, short sentences that explain what is going on and why (plain words with inline $...$), each derivation step as its own $$...$$ line with a few words saying what was done, the assumptions, and the result and its meaning. Never compress it into terse fragments or a bare list of equations. Only small additions (a missing step, a correction next to a line, a label) are short. Lines wrap to the page by themselves; in a notebook, long content continues on the next page.
 - Text you write on the board is automatically sized to match the user's handwriting where it goes. If they ask for it bigger or smaller, use size_scale (new writing) or resize_board_block (something already written).
 - Use annotate to flag a specific spot (an error, a check, a note).
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
@@ -205,6 +228,8 @@ export class Agent {
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
       recent_writing: recent || undefined,
+      // what watching has built up: the map of the page and the remarks it made (one shared memory)
+      board_map: awarenessForQuestion(b, page, snap),
       selection: selection ? { ...b.rectToImage(snap, selection), shape: selection.path ? 'lasso (only what is inside the outline)' : 'box' } : null,
       your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ id: x.id, at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
       notebook: page.notebook.slice(-40).map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
@@ -447,10 +472,7 @@ export class Agent {
   }
 
   async putTextOnBoard(text) {
-    const lines = [];
-    const display = text.match(/\$\$[\s\S]+?\$\$/g);
-    if (display?.length) display.forEach((d) => lines.push(d.replace(/\s+/g, ' ')));
-    else text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12).forEach((l) => lines.push(l.replace(/^[-*#>]+\s*/, '')));
+    const lines = mdToBoardLines(text); // the whole answer: headings, text, equations
     const b = this.board;
     const sel = b.selection;
     const cb = b.contentBounds();
@@ -461,7 +483,8 @@ export class Agent {
     const pos = sel ? { x: sel.x + sel.w + gap * 1.5, y: sel.y } : cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
     b.setLocked(true);
     try {
-      await b.addBlock({ lines, x: pos.x, y: pos.y, fontPx, color: style.color, strokePx: style.strokePx }, { animateMs: settings.writeAnimationMs });
+      const blk = await b.addBlock({ lines, x: pos.x, y: pos.y, fontPx, color: style.color, strokePx: style.strokePx }, { animateMs: settings.writeAnimationMs });
+      await b.keepOnPage(blk);
     } finally {
       b.setLocked(false);
     }

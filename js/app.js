@@ -130,6 +130,11 @@ window.livePages = new PageNav({ board, panel });
 
 
 $('#attention').addEventListener('change', (e) => setSettings({ attention: e.target.value }));
+// Awareness toggle next to the mode: Normal ↔ Deep
+$('#awarenessBtn').addEventListener('click', () => {
+  setSettings({ awareness: settings.awareness === 'deep' ? 'normal' : 'deep' });
+  toolToast(settings.awareness === 'deep' ? 'Deep awareness' : 'Normal awareness');
+});
 $('#voiceOutBtn').addEventListener('click', () => {
   setSettings({ voiceOut: !settings.voiceOut });
   if (!settings.voiceOut) voice.cancelSpeech();
@@ -238,7 +243,7 @@ function updateCost() {
 on('cost', updateCost);
 $('#costBtn').addEventListener('click', () => {
   const s = meter.stats();
-  const names = { answer: 'Answers', watch: 'Watching', verify: 'Error checks', code: 'App changes' };
+  const names = { answer: 'Answers', watch: 'Watching', verify: 'Error checks', stepback: 'Deep awareness', mark: 'Mark explanations', code: 'App changes' };
   const by = Object.entries(s.byPurpose).map(([k, v]) => `- ${names[k] || k}: ${fmt(v)}`).join('\n') || '- nothing yet';
   const budget = settings.dailyBudgetUSD > 0 ? `${fmt(settings.dailyBudgetUSD)} per day` : 'no limit';
   panel.add('info', `**Spending**\n\nThis session: ${fmt(s.session)}\nToday: ${fmt(s.today)} (budget ${budget})\n${by}\n\nThis month: ${fmt(s.month)}\n\nEstimated from token counts at list prices; the Claude Console usage page is the exact record.`);
@@ -247,6 +252,10 @@ $('#costBtn').addEventListener('click', () => {
 // ---------- settings → UI ----------
 function applySettings() {
   $('#attention').value = settings.attention;
+  const deep = settings.awareness === 'deep';
+  $('#awarenessBtn').classList.toggle('active', deep);
+  $('#awarenessBtn').title = deep ? 'Deep awareness: also looks at other parts of the page and steps back to look over the whole page in pauses (tap for Normal)' : 'Normal awareness (tap for Deep: looks over the whole page in pauses, costs more)';
+  $('#awarenessBtn').hidden = settings.attention === 'demand';
   $('#voiceOutBtn').classList.toggle('active', settings.voiceOut);
   panel.applyPosition();
   panel.renderActions();

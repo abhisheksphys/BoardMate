@@ -25,8 +25,9 @@ export const TOOL_SCHEMAS = [
   {
     name: 'write_on_canvas',
     description:
-      'Write typeset content on the board in the AI colour. `lines`: one entry per line. A line wrapped in $$...$$ is display math; other lines are text that may contain inline $...$. ' +
-      'Keep it short: equations and brief labels. Position: anchor "below_content" (default), "below_selection", "right_of_selection", or "at_xy" with x,y = top-left in pixels of the latest page image.',
+      'Write typeset content on the board in the AI colour. `lines`: one entry per line. A line wrapped in $$...$$ is display math; other lines are text that may contain inline $...$; ' +
+      '"# Title" / "## Section" lines are headings; "- item" is a bullet. Long lines wrap automatically to fit the page (or the visible board); in a notebook, content longer than the page continues on the next page. ' +
+      'Write as much as the request needs: a full explanation or derivation gets headings, explanatory sentences and every step, like a complete answer; a correction or a missing step stays short. Position: anchor "below_content" (default), "below_selection", "right_of_selection", or "at_xy" with x,y = top-left in pixels of the latest page image.',
     input_schema: {
       type: 'object',
       properties: {
@@ -217,7 +218,7 @@ export async function runTool(use, ctx) {
         } finally {
           board.setLocked(false);
         }
-        if (moved) return ok(use.id, `It did not fit on this page, so it was written at the top of page ${moved.page + 1} (now shown).`);
+        if (moved) return ok(use.id, `It did not all fit on this page, so it continues onto the next page (now on page ${moved.page + 1}).`);
         if (settings.narration && settings.voiceOut && !agent.spokeThisTurn) voice.speak('Done, it is on the board.');
         const at = snap ? board.worldToImage(snap, pos.x, pos.y) : null;
         return ok(use.id, `Wrote ${lines.length} line(s) on the board${at ? ` at about (${at.x}, ${at.y}) in image pixels` : ''}.`);

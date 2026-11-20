@@ -22,6 +22,7 @@ const SECTIONS = [
     { k: 'watchIdleSec', label: 'Live: look after you pause for (seconds)', type: 'number' },
     { k: 'quietIdleSec', label: 'Quiet live: look after you pause for (seconds)', type: 'number' },
     { k: 'watchMaxWaitSec', label: 'While writing non-stop, look at least every (seconds)', type: 'number' },
+    { k: 'awareness', label: 'Awareness', type: 'select', options: [['normal', 'Normal: follows the work and the board map; may look at one other part of the page when needed'], ['deep', 'Deep: may look at several other parts, and in pauses looks over the whole page with the strong model (costs more)']] },
     { k: 'escalate', label: 'Double-check suspected errors with the strong model', type: 'checkbox' },
     { k: 'markTap', label: 'Tapping a ✗ or ! mark', type: 'select', options: [['board', 'Claude writes what is wrong and the correct line next to it, on the page'], ['panel', 'Show the short note in the panel']] },
     { k: 'quietLowEffort', label: 'Quiet live: use low reasoning effort for looks (cheaper; check that Claude\'s notes and board requests stay accurate on your handwriting)', type: 'checkbox' },
@@ -238,7 +239,7 @@ export class SettingsUI {
     const el = document.getElementById('costBreakdown');
     if (!el) return;
     const s = meter.stats();
-    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', mark: 'Explaining tapped error marks', title: 'Session titles and summaries', find: 'Session search', search: 'Web searches (fee per search)', code: 'App changes' };
+    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', mark: 'Explaining tapped error marks', stepback: 'Deep awareness: looking over the whole page in pauses', mark: 'Explaining a tapped ✗ / ! on the page', title: 'Session titles and summaries', find: 'Session search', search: 'Web searches (fee per search)', code: 'App changes' };
     const rows = (by, total) => {
       const list = Object.entries(by || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
       if (!list.length) return '<div class="muted">Nothing yet.</div>';
