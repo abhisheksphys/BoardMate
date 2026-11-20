@@ -22,7 +22,7 @@ A personal handwriting whiteboard. Claude watches the page (images), listens (sp
 - `js/mathrender.js` — LaTeX → image (MathJax SVG) for AI blocks.
 - `js/agent.js` — main assistant loop and system prompt; sends page image + context with every question.
 - `js/tools.js` — tool schemas and handlers Claude can call (cas, write_on_canvas, view_page, set_page_paper, export_session, annotate, get_region, speak, notebook_update, update_settings, save_action, search_library, show_page, log_friction, propose_code_change, ship_change, roll_back).
-- `js/perception.js` — watcher loop (live / quiet live / on demand).
+- `js/perception.js` — watcher loop (live / quiet live / on demand). Looks only at what changed (far-apart changes as up to two separate looks); changes Claude makes (`markDirty(r, { ai: true })`) don't trigger looks. Questions get `board.focusArea()` (where the user was just writing) as a hint plus a close-up when useful.
 - `js/cas.js` — SymPy via Pyodide.
 - `js/voice.js` — speech in/out, barge-in.
 - `js/panel.js` — chat panel, Markdown + LaTeX rendering, docking.

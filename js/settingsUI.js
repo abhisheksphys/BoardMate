@@ -57,6 +57,7 @@ const SECTIONS = [
     { k: 'paper', label: 'Default paper for new freeform sessions (each session\'s own paper: the page setup icon next to its title)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
     { k: 'paperSpacing', label: 'Line / dot spacing on the paper', type: 'number', step: 2 },
     { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
+    { k: 'doubleTapAction', label: 'Double tap on the page with one finger runs', type: 'select', get options() { return [['', 'Nothing'], ...(settings.savedActions || []).map((a) => [a.name, `${a.name} (action button)`])]; } },
     { k: 'twoFingerSwap', label: 'Two-finger tap on the page switches to the last tool (e.g. pen ↔ eraser)', type: 'checkbox' },
     { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
   ]],
@@ -99,7 +100,7 @@ function fieldInner(f) {
   const v = getPath(settings, f.k);
   const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : f.avgHint ? '<small class="avg-hint"></small>' : f.ptHint ? '<small class="pt-hint"></small>' : '';
   if (f.type === 'checkbox') return `<label class="row check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> <span>${escapeHtml(f.label)}</span></label>`;
-  if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
+  if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${escapeHtml(val)}" ${val === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
   if (f.type === 'model') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}" data-model>${modelOptions(cachedModels(), v)}</select>${hint}</label>`;
   if (f.type === 'voice') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}"></select></label>`;
   if (f.type === 'lines') return `<label class="row"><span>${escapeHtml(f.label)}</span><textarea id="${id}" rows="4">${escapeHtml((v || []).join('\n'))}</textarea></label>`;

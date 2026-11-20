@@ -65,6 +65,7 @@ export const DEFAULTS = {
   paper: 'dots', // plain | dots | ruled | grid: for new pages, and pages that haven't picked their own
   paperSpacing: 40, // distance between lines or dots
   fingerDraws: false,
+  doubleTapAction: null, // one-finger double tap on the page runs this saved action (its name); '' = nothing
   twoFingerSwap: true, // a quick two-finger tap on the page switches to the last tool (pen ↔ eraser…)
   showMarks: true,
 
@@ -96,7 +97,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'markTap', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'showMarks',
+  'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 
@@ -123,6 +124,8 @@ export const settings = load();
 delete settings.voiceIn; // old setting: the mic is now always tap-on / tap-off
 if (settings.aiMatchSize === false) settings.aiSizeMode = 'manual'; // old on/off switch for size matching
 delete settings.aiMatchSize;
+// first time: a double tap runs your "AOP" action if you have one
+if (settings.doubleTapAction == null) settings.doubleTapAction = (settings.savedActions || []).find((a) => /^aop$/i.test(a.name))?.name || '';
 // Removed: both restarted listening without a tap, and on iPad a run started that way hears nothing.
 delete settings.voiceFreshRuns; delete settings.voiceWatchdogSec;
 

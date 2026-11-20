@@ -31,6 +31,32 @@ const VERIFY_SYSTEM = `You double-check suspected mistakes on a scientist's hand
 // as a form feed + "rac", and so on. Put the backslashes back.
 const fixLatex = (s) => String(s || '').replace(/\n(?=[a-zA-Z])/g, '\\n').replace(/\t(?=[a-zA-Z])/g, '\\t').replace(/\r(?=[a-zA-Z])/g, '\\r').replace(/\f/g, '\\f').replace(/\x08/g, '\\b');
 
+// Changed areas waiting for a look: a change joins an area when it is near it (roughly within a few lines),
+// otherwise it starts a new one; never more than two areas (the two closest are joined).
+const NEAR_X = 260, NEAR_Y = 180;
+function addChange(list, bb) {
+  let areas = [...(list || []), bb];
+  const near = (a, b) => a.x - NEAR_X < b.x + b.w && b.x - NEAR_X < a.x + a.w && a.y - NEAR_Y < b.y + b.h && b.y - NEAR_Y < a.y + a.h;
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < areas.length && !merged; i++)
+      for (let j = i + 1; j < areas.length && !merged; j++)
+        if (near(areas[i], areas[j])) { areas[i] = union(areas[i], areas[j]); areas.splice(j, 1); merged = true; }
+  }
+  while (areas.length > 2) {
+    let best = null;
+    for (let i = 0; i < areas.length; i++)
+      for (let j = i + 1; j < areas.length; j++) {
+        const u = union(areas[i], areas[j]), grow = u.w * u.h - areas[i].w * areas[i].h - areas[j].w * areas[j].h;
+        if (!best || grow < best.grow) best = { i, j, u, grow };
+      }
+    areas[best.i] = best.u;
+    areas.splice(best.j, 1);
+  }
+  return areas;
+}
+
 export class Perception {
   constructor({ board, panel, voice, agent }) {
     this.board = board;
@@ -43,7 +69,7 @@ export class Perception {
     this.pending = null;
     this.firstPendingAt = 0;
     this.running = false;
-    on('settled', (bb) => this.onSettled(bb));
+    on('settled', ({ bb, parts }) => this.onSettled(bb, parts));
     on('page', () => { this.pending = null; clearTimeout(this.timer); });
   }
 
@@ -62,17 +88,18 @@ export class Perception {
       'Live Board watching log',
       `when: ${new Date().toString()}`,
       `settings: mode=${s.attention} liveLookAfter=${s.watchIdleSec}s quietLookAfter=${s.quietIdleSec}s lookAtLeastEvery=${s.watchMaxWaitSec}s boardRequests=${s.boardRequests} escalate=${s.escalate} model=${s.models.fast} apiKey=${s.apiKey ? 'set' : 'MISSING'}`,
-      `state: looking=${!!this.running} waiting=${!!this.pending} claudeAnswering=${!!this.agent.busy} notesOnThisPage=${this.board.page.notebook.length}`,
+      `state: looking=${!!this.running} waiting=${!!this.pending?.length} claudeAnswering=${!!this.agent.busy} notesOnThisPage=${this.board.page.notebook.length}`,
       '',
       ...this.events.map((e) => `${e.t}  ${e.msg}${e.n > 1 ? `   (×${e.n}, last ${e.t2})` : ''}`),
     ].join('\n');
   }
 
-  onSettled(bb) {
+  onSettled(bb, parts) {
     if (settings.attention === 'demand') return this.log('page changed: not looking (mode is On demand)');
     if (!settings.apiKey) return this.log('page changed: not looking (no API key)');
-    if (!this.pending) this.firstPendingAt = Date.now();
-    this.pending = union(this.pending, bb);
+    if (!this.pending?.length) this.firstPendingAt = Date.now();
+    for (const p of parts?.length ? parts : [bb]) this.pending = addChange(this.pending, p);
+    this.leftover = false;
     const idle = settings.attention === 'live' ? settings.watchIdleSec : settings.quietIdleSec;
     this.log(`page changed: will look after ${idle} s without new changes`);
     this.schedule();
@@ -90,7 +117,7 @@ export class Perception {
   }
 
   async run() {
-    if (!this.pending || settings.attention === 'demand') return;
+    if (!this.pending?.length || settings.attention === 'demand') return;
     if (this.running || this.agent.busy) { this.log(this.running ? 'waiting: previous look still running' : 'waiting: Claude is answering a question'); return this.schedule(1500); }
     if (overBudget()) {
       if (!this.budgetNoted) {
@@ -101,8 +128,12 @@ export class Perception {
       this.pending = null;
       return;
     }
-    const dirty = this.pending;
-    this.pending = null;
+    // Changes far apart (a fix near the top, then more at the bottom) are looked at separately, each sharp,
+    // instead of one big mostly-empty picture; at most two areas.
+    const dirty = this.pending.shift();
+    this.leftover = this.pending.length > 0;
+    if (!this.pending.length) this.pending = null;
+    else this.log(`changes in ${this.pending.length + 1} separate areas: looking at each`);
     this.running = true;
     const b = this.board;
     const pageId = b.page.id;
@@ -246,7 +277,10 @@ export class Perception {
     } finally {
       if (!this.agent.busy) this.panel.status(''); // clear "looking…" unless an answer's own status is showing
       this.running = false;
-      if (this.pending) this.schedule();
+      if (this.pending?.length) {
+        if (this.leftover) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 400); } // the other area, right away
+        else this.schedule();
+      }
     }
   }
 

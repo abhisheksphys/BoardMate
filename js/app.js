@@ -77,6 +77,15 @@ on('two-finger-tap', () => {
   selectTool(to);
   toolToast(TOOL_NAMES[to] || to);
 });
+// A one-finger double tap on the page runs the action button chosen in Settings (e.g. AOP), like tapping it.
+on('double-tap', () => {
+  const name = settings.doubleTapAction;
+  if (!name) return;
+  const a = (settings.savedActions || []).find((x) => x.name === name);
+  if (!a) return toolToast(`No action called "${name}" (Settings → Board)`);
+  toolToast(`▸ ${a.name}`);
+  askFrom(a.prompt, 'double tap', a.name);
+});
 function toolToast(text) {
   let t = $('#toolToast');
   if (!t) { t = document.createElement('div'); t.id = 'toolToast'; $('#boardWrap').append(t); }

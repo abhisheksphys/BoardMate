@@ -53,6 +53,7 @@ Understanding the board
 - Blue typeset blocks with a thin bar on their left are things you wrote earlier. Small circled symbols are margin marks.
 - Pictures on the page (figures, photos, screenshots, book pages) were pasted by the user; read them as part of the page.
 - The user's current selection (a box, or a freehand lasso outline) is given in board_context.selection, and a second image shows it close up; with a lasso, everything outside the outline is faded. "This" usually means what they selected.
+- board_context.recent_writing (when there is no selection): where the user was writing most recently and how long ago, in pixels of the first image, sometimes with a close-up as the second image. Unless the question names something else, "this", "here", "the last line", "what I just wrote" and an unspecific "is this right?" usually mean that area. It is a hint, not a limit: anything the question names elsewhere on the page wins.
 - If something is too small or messy to read, call get_region for a sharper view.
 - Speech-to-text garbles math words ("curls" for curl, "dell" for del, "partial tea" for partial t); interpret charitably.
 
@@ -180,12 +181,30 @@ export class Agent {
     this.lastSnap = snap;
     const content = [imageBlock(snap)];
     if (selection) content.push(imageBlock(b.snapshot({ region: selection, maxDim: max, maxScale: 2.5, pad: 12 })));
+    // No selection: where the user was just writing, as a hint for "this" / "the last line" / "what I just wrote".
+    // A close-up of it goes along unless the page picture already shows that area large enough.
+    let recent = null;
+    const focus = !selection && b.focusArea();
+    if (focus) {
+      let r = focus.rect;
+      r = { x: r.x - 40, y: r.y - 110, w: r.w + 80, h: r.h + 140 }; // the lines just above lead into it
+      // whole lines: from where those lines begin to where they end, not just the newest strokes
+      for (const bb of b.lineBoxes?.(r) || []) { const x0 = Math.min(r.x, bb.x - 20), x1 = Math.max(r.x + r.w, bb.x + bb.w + 20); r = { ...r, x: x0, w: x1 - x0 }; }
+      if (b.layout) { const pr = b.pageRect(); const x0 = Math.max(0, r.x), y0 = Math.max(0, r.y); r = { x: x0, y: y0, w: Math.min(pr.w, r.x + r.w) - x0, h: Math.min(pr.h, r.y + r.h) - y0 }; }
+      if (r.w > 0 && r.h > 0) {
+        const share = (r.w * r.h) / Math.max(1, snap.bounds.w * snap.bounds.h);
+        const closeUp = share < 0.45 && snap.scale < 1.2; // small part of a big page: worth a sharper look
+        if (closeUp) content.push(imageBlock(b.snapshot({ region: r, maxDim: Math.min(800, max), maxScale: 2.5, pad: 10 })));
+        recent = { at: b.rectToImage(snap, focus.rect), seconds_ago: focus.secondsAgo, close_up: closeUp ? 'the second image' : undefined };
+      }
+    }
     const page = b.page;
     const ctx = {
       page: page.name,
       session_type: b.layout ? `notebook${b.layout.pdf ? ' from a PDF' : ''}: page ${b.pi + 1} of ${b.pages.length}, ${b.page.bg ? `PDF page ${b.page.bg.page} as background` : b.layout.pdf ? `a blank ${b.layout.size} page added between PDF pages` : `${b.layout.size} ${b.layout.orient}`}; the image shows the page. Board writing stays on the page; what doesn't fit continues on the next page.` : 'freeform (an endless page)',
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
+      recent_writing: recent || undefined,
       selection: selection ? { ...b.rectToImage(snap, selection), shape: selection.path ? 'lasso (only what is inside the outline)' : 'box' } : null,
       your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ id: x.id, at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
       notebook: page.notebook.slice(-40).map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
@@ -394,7 +413,7 @@ export class Agent {
         if (b.layout) await b.keepOnPage(blk);
         blk.forMark = m.id;
         m.explained = blk.id;
-        b.markDirty({ x: blk.x, y: blk.y, w: blk.w || 0, h: blk.h || 0 });
+        b.markDirty({ x: blk.x, y: blk.y, w: blk.w || 0, h: blk.h || 0 }, { ai: true });
         b.render();
         b.saveSoon();
       } finally {

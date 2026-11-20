@@ -586,7 +586,7 @@ export class Board {
     b.y = bottom;
     next.blocks.push(b);
     this.goto(from + 1);
-    this.markDirty({ x: b.x, y: b.y, w: b.w || 0, h: b.h || 0 });
+    this.markDirty({ x: b.x, y: b.y, w: b.w || 0, h: b.h || 0 }, { ai: b.author !== 'user' });
     this.saveSoon();
     return { page: from + 1 };
   }
@@ -659,6 +659,7 @@ export class Board {
     if (e.pointerType === 'touch') {
       this.touches.set(e.pointerId, this.evtPos(e));
       // a quick two-finger tap (no pinch, no drag) switches to the last tool: watch for one
+      if (this.touches.size >= 2) this.multiTouch = true; // not a one-finger tap any more
       if (this.touches.size === 2) this.tap2 = { t: performance.now(), start: new Map(this.touches), view: { ...this.page.view }, ok: true };
       else if (this.touches.size > 2) this.tap2 = null;
       try { this.c.setPointerCapture(e.pointerId); } catch {}
@@ -739,7 +740,7 @@ export class Board {
     this.page.blocks = this.page.blocks.filter((x) => x !== b);
     this.pushUndo({ remove: { blocks: [b] } });
     this.activeBlock = null;
-    this.markDirty({ x: b.x, y: b.y, w: b.w || 1, h: b.h || 1 });
+    this.markDirty({ x: b.x, y: b.y, w: b.w || 1, h: b.h || 1 }, { ai: b.author !== 'user' });
     this.render();
     this.saveSoon();
     return true;
@@ -803,6 +804,24 @@ export class Board {
       const g = this.gesture;
       this.touches.delete(e.pointerId);
       this.gesture = null;
+      // one-finger double tap on the page (quick, in the same spot, no other finger involved): the app runs the
+      // action chosen for it in Settings
+      if (!this.touches.size) {
+        const multi = this.multiTouch;
+        this.multiTouch = false;
+        const p = e.clientX !== undefined ? this.evtPos(e) : null;
+        const quick = p && !multi && g?.kind === 'pan' && performance.now() - g.t0 < 260 && Math.hypot(p.sx - g.p0.sx, p.sy - g.p0.sy) < 10;
+        if (quick && !this.hitMark(this.toWorld(p.sx, p.sy), true)) {
+          const lt = this.lastTap;
+          if (lt && performance.now() - lt.t < 350 && Math.hypot(p.sx - lt.sx, p.sy - lt.sy) < 40) {
+            this.lastTap = null;
+            if (this.slide) { this.slide = 0; this.render(); }
+            emit('double-tap', this.toWorld(p.sx, p.sy));
+            return;
+          }
+          this.lastTap = { t: performance.now(), sx: p.sx, sy: p.sy };
+        } else this.lastTap = null;
+      }
       const t2 = this.tap2;
       if (!this.touches.size && t2) {
         this.tap2 = null;
@@ -867,7 +886,7 @@ export class Board {
     } else if (d.move) {
       if (d.move.x !== d.from.x || d.move.y !== d.from.y) {
         this.pushUndo({ move: { id: d.move.id, from: d.from, to: { x: d.move.x, y: d.move.y } } });
-        this.markDirty({ x: d.move.x, y: d.move.y, w: d.move.w || 1, h: d.move.h || 1 });
+        this.markDirty({ x: d.move.x, y: d.move.y, w: d.move.w || 1, h: d.move.h || 1 }, { ai: d.move.author !== 'user' });
       }
     } else if (d.resize) {
       const b = d.resize;
@@ -880,7 +899,7 @@ export class Board {
           this.layoutBlock(b).then(() => { this.render(); this.saveSoon(); });
         }
         this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx, strokePx: b.strokePx } } });
-        this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h });
+        this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h }, { ai: b.author !== 'user' });
       } else Object.assign(b, { w: d.from.w, h: d.from.h });
     } else if (d.sel) {
       const s = d.sel;
@@ -920,6 +939,8 @@ export class Board {
     this.page.strokes.push(s);
     this.pushUndo({ add: { strokes: [s] } });
     this.markDirty(strokeBBox(s));
+    (this.recentInk ||= []).push({ page: this.page.id, t: Date.now(), bb: strokeBBox(s) });
+    if (this.recentInk.length > 400) this.recentInk.splice(0, 100);
     this.commitToPage(s); // drawn onto the page once; nothing else is redrawn
     this.saveSoon();
   }
@@ -980,15 +1001,48 @@ export class Board {
     this.render();
   }
 
+  // Where you were just writing: your strokes on this page in the half-minute before your latest one, if that
+  // latest stroke is less than 3 minutes old. Claude gets it as a hint for "this" / "the last line".
+  focusArea({ maxAgeSec = 180, spanSec = 30 } = {}) {
+    const ink = (this.recentInk || []).filter((r) => r.page === this.page?.id && this.page.strokes.length);
+    if (!ink.length) return null;
+    const last = ink[ink.length - 1].t;
+    const age = (Date.now() - last) / 1000;
+    if (age > maxAgeSec) return null;
+    // start from the latest stroke and grow backwards in time, only through strokes close to what is
+    // already included (so a jump to another part of the page doesn't widen it)
+    let bb = ink[ink.length - 1].bb;
+    for (let i = ink.length - 2; i >= 0; i--) {
+      const r = ink[i];
+      if (r.t < last - spanSec * 1000) break;
+      const g = 120;
+      if (r.bb.x < bb.x + bb.w + g && r.bb.x + r.bb.w > bb.x - g && r.bb.y < bb.y + bb.h + g * 0.6 && r.bb.y + r.bb.h > bb.y - g * 0.6) bb = union(bb, r.bb);
+    }
+    // keep only what is still on the page (it may have been erased since)
+    const cb = this.contentBounds();
+    if (!bb || !cb || bb.x > cb.x + cb.w || bb.y > cb.y + cb.h || bb.x + bb.w < cb.x || bb.y + bb.h < cb.y) return null;
+    return { rect: bb, secondsAgo: Math.round(age) };
+  }
+
+  // boxes of your strokes that lie in the vertical band of r (to widen a close-up to whole lines)
+  lineBoxes(r) {
+    return this.page.strokes.map(strokeBBox).filter((bb) => bb.y < r.y + r.h && bb.y + bb.h > r.y && bb.h < r.h * 1.5);
+  }
+
   // ---------- change tracking ----------
-  markDirty(bb) {
-    this.dirty = union(this.dirty, bb);
+  // ai: a change made by Claude (its own blocks, or you moving/resizing/deleting one of them): it is saved,
+  // but live watching does not spend a look on it.
+  markDirty(bb, { ai = false } = {}) {
     emit('changed');
+    if (ai || !bb) return;
+    this.dirty = union(this.dirty, bb);
+    (this.dirtyParts ||= []).push(bb); // the separate pieces, so far-apart changes can be looked at separately
     clearTimeout(this.settleTimer);
     this.settleTimer = setTimeout(() => {
-      const d = this.dirty;
+      const d = this.dirty, parts = this.dirtyParts || [];
       this.dirty = null;
-      if (d) emit('settled', d);
+      this.dirtyParts = [];
+      if (d) emit('settled', { bb: d, parts });
     }, 1100);
   }
 
@@ -1119,7 +1173,7 @@ export class Board {
     if (!op) return;
     this.applyOp(op, true);
     this.redoStack.push(op);
-    this.afterHistory();
+    this.afterHistory(op);
   }
 
   redo() {
@@ -1127,12 +1181,23 @@ export class Board {
     if (!op) return;
     this.applyOp(op, false);
     this.undoStack.push(op);
-    this.afterHistory();
+    this.afterHistory(op);
   }
 
-  afterHistory() {
-    const bb = this.contentBounds();
-    if (bb) this.markDirty(bb);
+  // after undo/redo: only what that step changed counts as changed (before, the whole page did, so live
+  // watching re-read the whole page after every undo)
+  afterHistory(op) {
+    let bb = null;
+    const P = this.page;
+    const each = (g) => {
+      for (const st of g?.strokes || []) bb = union(bb, strokeBBox(st));
+      for (const bl of g?.blocks || []) if (bl.author === 'user') bb = union(bb, { x: bl.x, y: bl.y, w: bl.w || 1, h: bl.h || 1 });
+    };
+    if (op) {
+      each(op.add); each(op.remove);
+      if (op.move) { const bl = P.blocks.find((x) => x.id === op.move.id); if (bl?.author === 'user') for (const r of [op.move.from, op.move.to]) bb = union(bb, { x: r.x, y: r.y, w: r.w || bl.w || 1, h: r.h || bl.h || 1 }); }
+    } else bb = this.contentBounds();
+    this.markDirty(bb);
     this.render();
     this.saveSoon();
   }
