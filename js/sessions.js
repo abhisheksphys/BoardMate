@@ -9,7 +9,8 @@ import { on, emit, uid, escapeHtml } from './bus.js';
 import { claude, textOf, parseJSON } from './claude.js';
 import { fmt } from './costs.js';
 import { makePopover } from './inktools.js';
-import { addPdf, listBooks, removeBook, copySessionBooks, dropSessionBooks } from './library.js';
+import { addPdf, listBooks, removeBook, copySessionBooks, dropSessionBooks, addNotebookPdf } from './library.js';
+import { rememberDoc, pageSizes } from './pdfbg.js';
 
 const $ = (s) => document.querySelector(s);
 const DAY = 86400000;
@@ -238,6 +239,35 @@ export class Sessions {
     await this.open(id, { initial: !this.currentId });
   }
 
+  // Notebook from PDF: one notebook page per PDF page, the PDF page as its background. The PDF is stored once
+  // (library store, kind 'notebook', hidden from the reference library) and never changed; pages only point to it.
+  async newPdfNotebook(file, { paper = 'ruled', scroll = 'vertical' } = {}) {
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') return this.panel.add('error', `${file.name} is not a PDF.`);
+    const layout = { size: 'A4', orient: 'portrait', paper, scroll };
+    const title = file.name.replace(/\.pdf$/i, '').slice(0, 80) || 'PDF notebook';
+    const sid = await this.create({ title, titleAuto: false, layout });
+    try {
+      this.panel.status(`Opening ${file.name}…`);
+      const { id, doc, numPages } = await addNotebookPdf(file, sid);
+      rememberDoc(id, doc);
+      const sizes = await pageSizes(doc, (i, n) => this.panel.status(`Reading ${file.name}: page ${i} of ${n}…`));
+      const pages = sizes.map((sz, i) => ({ id: uid(), name: `Page ${i + 1}`, paper, strokes: [], blocks: [], marks: [], notebook: [], view: { ox: 40, oy: 40, z: 1 }, bg: { pdf: id, page: i + 1, w: sz.w, h: sz.h } }));
+      const meta = await idb.get('sessions', sid);
+      meta.layout = { ...layout, pdf: { id, name: file.name, pages: numPages } };
+      await idb.set('sessions', sid, meta);
+      await idb.set('sessionData', sid, { pages, chat: [], exchanges: [], snap: null });
+      this.panel.status('');
+      await this.open(sid, { initial: !this.currentId });
+      this.panel.add('info', `${file.name}: ${numPages} page${numPages === 1 ? '' : 's'}. Write on any page; add a blank page between pages from the page number (bottom left) → ⋯ → Insert blank page after, or pull past the last page.`, { noLog: true });
+    } catch (e) {
+      this.panel.status('');
+      await idb.del('sessions', sid).catch(() => {});
+      await idb.del('sessionData', sid).catch(() => {});
+      await dropSessionBooks(sid).catch(() => {});
+      this.panel.add('error', `Could not open ${file.name} as a notebook: ${/password/i.test(e?.message || '') ? 'it is password-protected.' : e?.message || e}`);
+    }
+  }
+
   // The "New session" button: choose freeform or notebook (and the notebook's page setup).
   chooseNewSession() {
     const d = $('#newSessionDlg');
@@ -260,7 +290,9 @@ export class Sessions {
     if (lay) { set('size', lay.size); set('orient', lay.orient); set('scroll', lay.scroll); }
     set('paper', this.board.paperOf());
     set('scope', 'page');
-    $('#psHint').textContent = lay
+    $('#psHint').textContent = lay?.pdf
+      ? 'PDF notebook: pages from the PDF keep their own size and have no paper; page size, orientation and paper apply to the blank pages you add.'
+      : lay
       ? 'Changes show right away. A smaller page can hide writing near its edges (it is kept, just outside the page).'
       : 'Changes show right away. Freeform sessions have one setting: the paper.';
     d.showModal();
@@ -372,11 +404,11 @@ export class Sessions {
 
   // ---------- backup / restore ----------
   async backup() {
-    const withPdfs = confirm('Include your PDFs in the backup?\n\nOK = include them (bigger file)\nCancel = sessions and settings only');
+    const withPdfs = confirm('Include your reference PDFs in the backup?\n\nOK = include them (bigger file)\nCancel = sessions and settings only (the PDFs of PDF notebooks are always included: they are the notebooks\' pages)');
     await this.save({ snapshot: true });
     const sessions = [];
     for (const m of (await idb.all('sessions')) || []) sessions.push({ meta: m, data: await idb.get('sessionData', m.id) });
-    const books = withPdfs ? ((await idb.all('library')) || []).map((b) => ({ ...b, data: abToB64(b.data) })) : [];
+    const books = ((await idb.all('library')) || []).filter((b) => withPdfs || b.kind === 'notebook').map((b) => ({ ...b, data: abToB64(b.data) }));
     const s = structuredClone(settings);
     delete s.apiKey;
     if (s.github) delete s.github.token;
@@ -457,9 +489,15 @@ export class Sessions {
       if (card) {
         dlg.querySelectorAll('.type-card').forEach((c) => c.classList.toggle('on', c === card));
         this.nsType = card.dataset.type;
-        $('#nsOptions').hidden = this.nsType !== 'note';
+        const pdf = this.nsType === 'pdf';
+        $('#nsOptions').hidden = this.nsType === 'free';
+        $('#nsOptions').classList.toggle('pdf', pdf);
+        $('#nsOptions .seg[data-name="paper"]').previousElementSibling.textContent = pdf ? 'Blank pages' : 'Paper';
+        $('#nsHint').textContent = pdf
+          ? 'PDF pages keep their own size; blank pages you add between them are A4 with this paper. The PDF itself is never changed: your writing is a separate layer.'
+          : 'You can change all of this later in Page setup.';
         $('#nsCreate').disabled = false;
-        $('#nsCreate').textContent = this.nsType === 'note' ? 'Create notebook' : 'Create';
+        $('#nsCreate').textContent = pdf ? 'Choose PDF…' : this.nsType === 'note' ? 'Create notebook' : 'Create';
         return;
       }
       const opt = e.target.closest('.seg button');
@@ -469,12 +507,21 @@ export class Sessions {
     for (const id of ['#nsCancel', '#nsCancel2']) $(id).addEventListener('click', () => dlg.close());
     $('#nsCreate').addEventListener('click', async () => {
       const pick = (name) => dlg.querySelector(`.seg[data-name="${name}"] .on`)?.dataset.v;
+      if (this.nsType === 'pdf') return $('#nsPdfFile').click(); // the sheet stays open until a PDF is picked
       dlg.close();
       if (this.nsType !== 'note') return this.newSession();
       const layout = { size: pick('size') || 'A4', orient: pick('orient') || 'portrait', paper: pick('paper') || 'ruled', scroll: pick('scroll') || 'vertical' };
       await this.newSession('', { layout });
       // the first page of a new notebook gets the notebook's paper
       if (this.board.pages[0]) { this.board.pages[0].paper = layout.paper; this.board.render(); }
+    });
+    $('#nsPdfFile').addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      const pick = (name) => dlg.querySelector(`.seg[data-name="${name}"] .on`)?.dataset.v;
+      dlg.close();
+      await this.newPdfNotebook(f, { paper: pick('paper') || 'ruled', scroll: pick('scroll') || 'vertical' });
     });
     $('#branchCurrent').addEventListener('click', () => this.branch(this.currentId));
     $('#backupBtn').addEventListener('click', () => this.backup());

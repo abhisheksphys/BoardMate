@@ -5,6 +5,7 @@ import { searchLibrary, renderPage, listBooks } from './library.js';
 import { imageBlock } from './claude.js';
 import { emit } from './bus.js';
 import { texErrors } from './mathrender.js';
+import { pageText } from './pdfbg.js';
 
 export const TOOL_SCHEMAS = [
   {
@@ -233,12 +234,12 @@ export async function runTool(use, ctx) {
         const max = settings.imageMaxPx || 1100;
         let shot, page;
         if (inp.go) {
-          board.goto(i);
+          board.jumpTo(i); // remembered, so the user can tap Back
           await new Promise((r) => setTimeout(r, 50));
           ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5 }));
           agent.lastSnap = shot; // tools now work on this page
         } else ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5 }));
-        const blank = !page.strokes.length && !page.blocks.length;
+        const blank = !page.bg && !page.strokes.length && !page.blocks.length;
         const info = {
           page: i + 1,
           name: page.name,
@@ -246,6 +247,10 @@ export async function runTool(use, ctx) {
           notes: (page.notebook || []).map((e) => ({ latex: e.latex, description: e.description })),
           your_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => x.lines),
         };
+        if (page.bg) {
+          info.pdf_page = page.bg.page;
+          try { const t = (await pageText(page.bg)).text; if (t.trim()) info.printed_text = t.slice(0, 6000); } catch {}
+        }
         const note = inp.go ? 'The board now shows this page; x,y in this image are valid for annotate and write_on_canvas.' : 'For reading only: the user is still on their own page, so do not use x,y from this image with annotate or write_on_canvas.';
         return ok(use.id, [...(blank ? [] : [imageBlock(shot)]), { type: 'text', text: `${blank ? 'This page is empty. ' : ''}${note}\n${JSON.stringify(info)}` }]);
       }
@@ -276,6 +281,10 @@ export async function runTool(use, ctx) {
         if (!snap) return fail(use.id, 'No page image yet.');
         const a = board.imageToWorld(snap, inp.x, inp.y);
         const region = { x: a.x, y: a.y, w: inp.w / snap.scale, h: inp.h / snap.scale };
+        if (board.page.bg) { // a PDF page: render its print sharp enough for this close-up
+          const k = Math.min(4, (settings.imageMaxPx || 1100) / Math.max(region.w, region.h, 1));
+          await board.bgReady(board.page, board.page.bg.w * k);
+        }
         const crop = board.snapshot({ region, maxDim: settings.imageMaxPx || 1100, maxScale: 4, pad: 0 });
         return ok(use.id, [imageBlock(crop), { type: 'text', text: 'Sharper view of the requested region.' }]);
       }

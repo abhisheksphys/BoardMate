@@ -3,6 +3,7 @@
 import { emit, uid, union, sleep } from './bus.js';
 import { settings } from './settings.js';
 import { texToImage, lineToTex } from './mathrender.js';
+import { cachedBg, renderBg, bgNeedsBetter, thumbBg } from './pdfbg.js';
 
 const FONT = '-apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif';
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -241,6 +242,7 @@ export class Board {
   }
 
   load(pages) {
+    this.backStack = [];
     this.pages = Array.isArray(pages) ? pages : [];
     if (!this.pages.length) this.newPage();
     for (const p of this.pages) { p.notebook ||= []; p.marks ||= []; p.blocks ||= []; p.view ||= { ox: 40, oy: 40, z: 1 }; }
@@ -262,6 +264,136 @@ export class Board {
   }
 
   addPage() { this.newPage(); this.goto(this.pages.length - 1); this.saveSoon(); }
+
+  // ---------- page management (the Pages overview) ----------
+  // Default names ("Page 3") follow the page's position; names you give a page are kept.
+  renumber() { this.pages.forEach((p, i) => { if (!p.customName && /^Page \d+$/.test(p.name || 'Page 0')) p.name = `Page ${i + 1}`; }); }
+
+  pagesChanged(keepId) {
+    this.renumber();
+    const i = this.pages.findIndex((p) => p.id === keepId);
+    this.goto(i >= 0 ? i : Math.min(this.pi, this.pages.length - 1));
+    emit('changed');
+    this.saveSoon();
+  }
+
+  insertPage(at) {
+    const keep = this.page.id;
+    this.newPage();
+    const p = this.pages.pop();
+    this.pages.splice(Math.max(0, Math.min(at, this.pages.length)), 0, p);
+    this.pagesChanged(keep);
+    return p;
+  }
+
+  duplicatePage(i) {
+    const src = this.pages[i];
+    if (!src) return null;
+    const copy = structuredClone(src);
+    copy.id = uid();
+    for (const b of copy.blocks) b.id = uid(); // its own blocks (laid out separately)
+    for (const s of copy.strokes) s.id = uid();
+    if (src.customName) copy.name = `${src.name} (copy)`;
+    copy.starred = false;
+    const keep = this.page.id;
+    this.pages.splice(i + 1, 0, copy);
+    this.pagesChanged(keep);
+    return copy;
+  }
+
+  deletePage(i) {
+    if (!this.pages[i]) return;
+    const keep = this.page.id;
+    this.pages.splice(i, 1);
+    if (!this.pages.length) this.newPage(); // a session always keeps one page
+    this.backStack = (this.backStack || []).filter((id) => this.pages.some((p) => p.id === id));
+    this.pagesChanged(keep);
+  }
+
+  movePage(from, to) {
+    if (!this.pages[from] || from === to) return;
+    const keep = this.page.id;
+    const [p] = this.pages.splice(from, 1);
+    this.pages.splice(Math.max(0, Math.min(to, this.pages.length)), 0, p);
+    this.pagesChanged(keep);
+  }
+
+  toggleStar(i = this.pi) {
+    const p = this.pages[i];
+    if (!p) return;
+    p.starred = !p.starred;
+    emit('page', { page: this.page, index: this.pi, count: this.pages.length });
+    this.saveSoon();
+    return p.starred;
+  }
+
+  // A jump (overview, page number, search, Claude) remembers where you were, for the Back button.
+  // Swiping to the next page is not a jump.
+  jumpTo(i, { remember = true } = {}) {
+    if (!this.pages[i] || i === this.pi) return;
+    if (remember) { (this.backStack ||= []).push(this.page.id); if (this.backStack.length > 20) this.backStack.shift(); }
+    if (this.layout && Math.abs(i - this.pi) === 1 && !remember) this.flipTo(i - this.pi);
+    else this.goto(i);
+  }
+
+  goBack() {
+    while (this.backStack?.length) {
+      const i = this.pages.findIndex((p) => p.id === this.backStack.pop());
+      if (i >= 0 && i !== this.pi) { this.goto(i); return true; }
+    }
+    emit('page', { page: this.page, index: this.pi, count: this.pages.length });
+    return false;
+  }
+
+  // Small picture of a page for the overview: a notebook page as a whole sheet (with its paper),
+  // a freeform page as what is written on it. Cached until the page changes.
+  async thumbnail(i, width = 220) {
+    const p = this.pages[i];
+    if (!p) return null;
+    const last = p.strokes[p.strokes.length - 1];
+    const stamp = `${p.strokes.length}:${last?.id || ''}:${last?.points?.length || 0}:${p.blocks.length}:${p.blocks.map((b) => `${b.x | 0},${b.y | 0},${b.w | 0}`).join(';')}:${p.paper}:${p.bg ? `${p.bg.pdf}#${p.bg.page}` : this.layout ? `${this.layout.size}${this.layout.orient}` : 'free'}`;
+    let bgImg = null;
+    if (p.bg) { try { bgImg = await thumbBg(p.bg, width * 2); } catch {} }
+    this.thumbs ||= new Map();
+    const hit = this.thumbs.get(p.id);
+    if (hit?.stamp === stamp) return hit.url;
+    const keep = this.pi;
+    this.pi = i;
+    try {
+      await Promise.all(this.page.blocks.map((b) => (this.layouts.has(b.id) ? null : this.layoutBlock(b))));
+      let bb;
+      if (this.layout) bb = this.pageRect();
+      else {
+        const cb = this.contentBounds();
+        bb = cb ? { x: cb.x - 30, y: cb.y - 30, w: cb.w + 60, h: cb.h + 60 } : { x: 0, y: 0, w: 800, h: 600 };
+        const ratio = 1.3; // keep tiles a similar shape: pad the short side
+        if (bb.h / bb.w < ratio) { const nh = bb.w * ratio; bb.y -= (nh - bb.h) / 2; bb.h = nh; }
+        else { const nw = bb.h / ratio; bb.x -= (nw - bb.w) / 2; bb.w = nw; }
+      }
+      const scale = width / bb.w;
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(bb.w * scale);
+      cv.height = Math.round(bb.h * scale);
+      const ctx = cv.getContext('2d');
+      const paint = () => {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        if (bgImg) ctx.drawImage(bgImg, 0, 0, cv.width, cv.height);
+        this.skipBg = !!p.bg;
+        try { this.drawContent(ctx, { z: scale, ox: -bb.x * scale, oy: -bb.y * scale }, 1, bb, true); }
+        finally { this.skipBg = false; }
+      };
+      paint();
+      let url;
+      try { url = cv.toDataURL('image/jpeg', 0.8); }
+      catch { this.noImageBlocks = true; paint(); this.noImageBlocks = false; url = cv.toDataURL('image/jpeg', 0.8); }
+      this.thumbs.set(p.id, { stamp, url });
+      return url;
+    } finally {
+      this.pi = keep;
+    }
+  }
 
   // ---------- geometry ----------
   resize() {
@@ -315,20 +447,22 @@ export class Board {
 
   // ---------- notebook pages ----------
   setLayout(layout) {
-    this.layout = layout ? { size: layout.size || 'A4', orient: layout.orient || 'portrait', scroll: layout.scroll || 'vertical', paper: layout.paper || 'ruled' } : null;
+    this.layout = layout ? { size: layout.size || 'A4', orient: layout.orient || 'portrait', scroll: layout.scroll || 'vertical', paper: layout.paper || 'ruled', ...(layout.pdf ? { pdf: layout.pdf } : {}) } : null;
     this.slide = 0;
     if (this.page) { if (this.layout) this.fit(); this.render(); }
   }
 
-  pageSize() {
+  // A page from a PDF keeps that page's own size; blank pages use the notebook's page setup.
+  pageSize(page = this.page) {
+    if (page?.bg) return { w: page.bg.w, h: page.bg.h };
     const [a, b] = PAGE_SIZES[this.layout?.size] || PAGE_SIZES.A4;
     return this.layout?.orient === 'landscape' ? { w: b, h: a } : { w: a, h: b };
   }
 
-  pageRect() { const s = this.pageSize(); return { x: 0, y: 0, w: s.w, h: s.h }; }
+  pageRect(page = this.page) { const s = this.pageSize(page); return { x: 0, y: 0, w: s.w, h: s.h }; }
 
-  fitZoom() {
-    const s = this.pageSize();
+  fitZoom(page = this.page) {
+    const s = this.pageSize(page);
     return Math.max(0.05, Math.min((this.w - 2 * PAGE_MARGIN) / s.w, (this.h - 2 * PAGE_MARGIN) / s.h));
   }
 
@@ -356,18 +490,29 @@ export class Board {
   vertical() { return this.layout?.scroll !== 'horizontal'; }
 
   // screen distance from one page to the next while flipping
-  pageStep() { const s = this.pageSize(); return (this.vertical() ? s.h : s.w) * this.page.view.z + PAGE_GAP; }
+  // (pages can differ in size, e.g. a blank A4 page between PDF pages: neighbours are drawn at the same zoom,
+  // and the step is from this page's edge to the neighbour's edge)
+  pageStep(dir = 1) {
+    const v = this.vertical(), z = this.page.view.z;
+    const span = (p) => { const s = this.pageSize(p); return (v ? s.h : s.w) * z; };
+    const other = this.pages[this.pi + (dir < 0 ? -1 : 1)];
+    if (dir < 0 && other) return span(other) + PAGE_GAP;
+    return span(this.page) + PAGE_GAP;
+  }
 
   prepareNeighbours() {
     for (const k of [-1, 1]) {
       const p = this.pages[this.pi + k];
       if (p) for (const b of p.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
+      // PDF pages: render the neighbours' backgrounds ahead, so flipping shows them sharp
+      if (p?.bg) { const px = p.bg.w * this.page.view.z * this.dpr; if (bgNeedsBetter(p.bg, px)) renderBg(p.bg, px).catch(() => {}); }
     }
+    if (this.page?.bg) { const px = this.page.bg.w * this.page.view.z * this.dpr; if (bgNeedsBetter(this.page.bg, px)) renderBg(this.page.bg, px).then(() => this.render()).catch(() => {}); }
   }
 
   // Slide to the next (+1) or previous (-1) page, or back (0), and settle there: a page is never left half in view.
   flipTo(dir) {
-    const target = dir === 0 || !this.pages[this.pi + dir] ? 0 : -dir * this.pageStep();
+    const target = dir === 0 || !this.pages[this.pi + dir] ? 0 : -dir * this.pageStep(dir);
     const from = this.slide, t0 = performance.now(), ms = 220;
     cancelAnimationFrame(this.flipRaf);
     const stepFn = (t) => {
@@ -384,6 +529,7 @@ export class Board {
 
   // An image of another page (for Claude), without showing it: its blocks are laid out first.
   async pageSnapshot(i, opts = {}) {
+    await this.bgReady(this.pages[i]);
     const keep = this.pi;
     this.pi = i;
     try {
@@ -410,7 +556,9 @@ export class Board {
     const from = this.pi;
     this.page.blocks.splice(this.page.blocks.indexOf(b), 1);
     this.render();
+    // continues on the next page; never on top of a PDF page's print: then a blank page is put in after this one
     if (from + 1 >= this.pages.length) this.newPage();
+    else if (this.pages[from + 1].bg) { const np = this.newPage(); this.pages.pop(); this.pages.splice(from + 1, 0, np); this.renumber(); emit('changed'); }
     const next = this.pages[from + 1];
     let bottom = m;
     for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + 20); }
@@ -1226,12 +1374,31 @@ export class Board {
     ctx.setTransform(scale * view.z, 0, 0, scale * view.z, scale * view.ox, scale * view.oy);
     const vis = area || { x: -view.ox / view.z, y: -view.oy / view.z, w: ctx.canvas.width / (scale * view.z), h: ctx.canvas.height / (scale * view.z) };
     const meets = (b) => b.x < vis.x + vis.w && b.x + b.w > vis.x && b.y < vis.y + vis.h && b.y + b.h > vis.y;
-    if (grid) this.drawGrid(ctx, view, vis);
+    if (this.page.bg) { if (!this.skipBg) this.drawBg(ctx, view, scale); }
+    else if (grid) this.drawGrid(ctx, view, vis);
     for (const b of this.page.blocks) if (meets({ x: b.x - 12, y: b.y, w: (b.w || 200) + 12, h: b.h || 40 })) this.drawBlock(ctx, b);
     for (const s of this.page.strokes) if (meets(strokeBBox(s))) drawStroke(ctx, s);
   }
 
+  // A PDF page's background: the sharpest copy rendered so far, and a sharper one asked for when needed
+  // (it is drawn when ready). Until the first one is ready, a light placeholder.
+  drawBg(ctx, view, scale) {
+    const bg = this.page.bg, px = bg.w * view.z * scale;
+    const img = cachedBg(bg);
+    if (img) ctx.drawImage(img, 0, 0, bg.w, bg.h);
+    else { ctx.fillStyle = '#f4f5f7'; ctx.fillRect(0, 0, bg.w, bg.h); }
+    if (ctx === this.ctx && bgNeedsBetter(bg, px)) {
+      renderBg(bg, px).then(() => this.render()).catch((e) => { if (!this.bgWarned) { this.bgWarned = true; emit('notice', { kind: 'error', text: 'Could not draw a PDF page: ' + (e.message || e) }); } });
+    }
+  }
+
+  // Before a picture of a page goes to Claude (or into a thumbnail/export), its PDF page is rendered sharp enough.
+  async bgReady(page = this.page, px = 1400) {
+    if (page?.bg) { try { await renderBg(page.bg, px); } catch {} }
+  }
+
   // Notebook: grey desk, the current page (and, while flipping, its neighbours) as sheets of paper.
+  // Pages can differ in size (PDF pages, blank pages between them): each is drawn at its own size, centred.
   drawNotebook() {
     const ctx = this.ctx, v = this.page.view, s = this.pageSize(), step = this.pageStep();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1241,9 +1408,11 @@ export class Board {
     for (const k of [-1, 0, 1]) {
       const i = keep + k;
       if (!this.pages[i]) continue;
-      const off = this.slide + k * step;
+      const off = this.slide + (k < 0 ? -this.pageStep(-1) : k > 0 ? this.pageStep(1) : 0);
       if (Math.abs(off) >= (this.vertical() ? this.h : this.w) + step) continue;
-      const view = { z: v.z, ox: v.ox + (this.vertical() ? 0 : off), oy: v.oy + (this.vertical() ? off : 0) };
+      const ns = this.pageSize(this.pages[i]);
+      const cross = this.vertical() ? ((s.w - ns.w) * v.z) / 2 : ((s.h - ns.h) * v.z) / 2;
+      const view = { z: v.z, ox: v.ox + (this.vertical() ? cross : off), oy: v.oy + (this.vertical() ? off : cross) };
       this.pi = i;
       try {
         ctx.save();
@@ -1252,10 +1421,10 @@ export class Board {
         ctx.shadowBlur = 10 * this.dpr;
         ctx.shadowOffsetY = 2 * this.dpr;
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, s.w, s.h);
+        ctx.fillRect(0, 0, ns.w, ns.h);
         ctx.shadowColor = 'transparent';
         ctx.beginPath();
-        ctx.rect(0, 0, s.w, s.h);
+        ctx.rect(0, 0, ns.w, ns.h);
         ctx.clip();
         this.drawContent(ctx, view, this.dpr, null, true);
         ctx.restore();
@@ -1266,8 +1435,10 @@ export class Board {
     // pulling past the last page: the outline of a page that is about to be added
     if (this.slide < 0 && keep === this.pages.length - 1) {
       const off = this.slide + step;
-      const x = v.ox + (this.vertical() ? 0 : off), y = v.oy + (this.vertical() ? off : 0);
-      const w = s.w * v.z, h = s.h * v.z, d = this.dpr;
+      const ns = this.pageSize({}); // a new page is blank: the notebook's page size
+      const cross = this.vertical() ? ((s.w - ns.w) * v.z) / 2 : ((s.h - ns.h) * v.z) / 2;
+      const x = v.ox + (this.vertical() ? cross : off), y = v.oy + (this.vertical() ? off : cross);
+      const w = ns.w * v.z, h = ns.h * v.z, d = this.dpr;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = Math.min(1, Math.abs(this.slide) / (step * 0.2));

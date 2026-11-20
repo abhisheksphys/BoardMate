@@ -408,7 +408,7 @@ dialog.sheet::backdrop { background: rgba(20, 20, 25, 0.32); backdrop-filter: bl
 .sheet header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 6px; }
 .sheet h3 { margin: 0; font-size: 19px; font-weight: 650; }
 .sheet .sheet-x { width: 34px; height: 34px; border-radius: 50%; font-size: 22px; line-height: 1; color: var(--muted); padding: 0; background: #f1f0ec; }
-.sheet .type-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 20px 16px; }
+.sheet .type-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 12px 20px 16px; }
 .sheet .type-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--surface); min-height: 150px; transition: border-color .15s, background .15s, box-shadow .15s; }
 .sheet .type-card:hover { border-color: #c9c6bf; }
 .sheet .type-card.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px rgba(26, 95, 208, 0.12); }
@@ -441,3 +441,62 @@ dialog.sheet::backdrop { background: rgba(20, 20, 25, 0.32); backdrop-filter: bl
 .sheet .sheet-x:focus { outline: none; }
 .sheet .type-card svg .paper, .sheet .type-card svg .rule, .sheet .type-card svg .ink, .sheet .type-card svg .arrow { vector-effect: non-scaling-stroke; }
 .when[hidden] { display: none; }
+
+
+/* Floating page navigation, bottom left of the board: [← Page 3] [☆] [3 / 12] */
+.page-badge { position: absolute; left: 14px; bottom: 14px; z-index: 4; display: flex; align-items: center; gap: 6px; }
+.page-badge[hidden] { display: none; }
+.page-badge button { height: 32px; padding: 0 12px; border-radius: 999px; background: rgba(29, 29, 31, 0.78); color: #fff; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.18); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.page-badge button[hidden] { display: none; }
+#pageBadgeBtn b { font-weight: 700; }
+#pageBadgeBtn span { opacity: 0.75; }
+.page-badge .pg-starbtn { width: 32px; padding: 0; font-size: 16px; }
+.page-badge .pg-starbtn.on { color: #ffcc33; }
+.page-badge .pg-back { background: var(--accent); }
+
+/* Pages overview */
+dialog.pages-sheet { width: min(980px, calc(100vw - 32px)); height: min(86vh, 900px); display: none; flex-direction: column; }
+dialog.pages-sheet[open] { display: flex; }
+.pages-sheet header { gap: 12px; }
+.pages-sheet header h3 { flex: none; }
+.pg-goto { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 13px; color: var(--muted); }
+.pg-goto input { width: 58px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; text-align: center; font: inherit; color: var(--ink); }
+.pg-goto input:focus { outline: none; border-color: var(--accent); }
+.pg-goto button { padding: 5px 12px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; }
+.pg-tools { display: flex; gap: 10px; align-items: center; padding: 6px 20px 10px; flex-wrap: wrap; }
+.pg-tools input { flex: 1 1 260px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit; }
+.pg-tools input:focus { outline: none; border-color: var(--accent); }
+.pg-chips { display: flex; gap: 6px; }
+.pg-chips .chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; }
+.pg-chips .chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.pg-grid { flex: 1; overflow-y: auto; padding: 4px 20px 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; align-content: start; background: #f7f6f3; }
+.pg-tile { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.pg-thumb { padding: 0; border-radius: 6px; background: #fff; border: 1px solid var(--line); box-shadow: 0 1px 4px rgba(0,0,0,0.08); aspect-ratio: 1 / 1.3; overflow: hidden; display: block; width: 100%; }
+.pg-grid.notebook .pg-thumb { aspect-ratio: auto; }
+.pg-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
+.pg-grid.notebook .pg-thumb img { height: auto; }
+.pg-tile.current .pg-thumb { outline: 3px solid var(--accent); outline-offset: 2px; }
+.pg-foot { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.pg-num { font-weight: 700; min-width: 18px; }
+.pg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.pg-name small { display: block; color: var(--accent); overflow: hidden; text-overflow: ellipsis; }
+.pg-foot button { padding: 2px 6px; font-size: 15px; color: var(--muted); }
+.pg-foot .pg-star.on { color: #e0a800; }
+.pg-grip { cursor: grab; padding: 2px 4px; color: #9a9aa0; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pg-tile.dragging { opacity: 0.45; }
+.pg-tile.drop-before::before, .pg-tile.drop-after::after { content: ''; position: absolute; top: 0; bottom: 30px; width: 4px; border-radius: 2px; background: var(--accent); }
+.pg-tile.drop-before::before { left: -10px; }
+.pg-tile.drop-after::after { right: -10px; }
+.pg-menu { position: absolute; right: 0; bottom: 30px; z-index: 2; display: flex; flex-direction: column; min-width: 190px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.18); }
+.pg-menu[hidden] { display: none; }
+.pg-menu button { text-align: left; padding: 8px 10px; border-radius: 8px; font-size: 14px; }
+.pg-menu button:hover { background: #f1f0ec; }
+.pg-menu .danger { color: var(--error); }
+.pg-empty { grid-column: 1 / -1; padding: 30px 10px; color: var(--muted); text-align: center; }
+.pages-sheet footer { justify-content: flex-start; border-top: 1px solid var(--line); }
+.page-badge button:focus:not(:focus-visible) { outline: none; }
+.page-badge button:focus { outline: none; }
+
+/* PDF notebooks */
+.ns-options.pdf .nb-only { display: none; }
+.pg-tile .pg-pdf { position: absolute; top: 6px; left: 6px; font: 600 10px var(--font); color: #8a2b1d; background: rgba(255,255,255,.9); border: 1px solid #e7c9c3; border-radius: 6px; padding: 1px 5px; pointer-events: none; }

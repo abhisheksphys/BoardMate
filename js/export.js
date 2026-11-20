@@ -4,6 +4,7 @@
 import { settings } from './settings.js';
 import { claude, textOf } from './claude.js';
 import { priceOf, fmt } from './costs.js';
+import { idb } from './storage.js';
 
 const JSPDF = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 const A4 = { w: 210, h: 297 }; // mm
@@ -21,6 +22,20 @@ function loadJsPDF() {
   return jspdfLoading;
 }
 
+const PDFLIB = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+let pdflibLoading;
+function loadPdfLib() {
+  if (window.PDFLib?.PDFDocument) return Promise.resolve(window.PDFLib);
+  pdflibLoading ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = PDFLIB;
+    s.onload = () => (window.PDFLib?.PDFDocument ? resolve(window.PDFLib) : reject(new Error('PDF library did not load')));
+    s.onerror = () => { pdflibLoading = null; reject(new Error('Could not load the PDF library (are you online?)')); };
+    document.head.append(s);
+  });
+  return pdflibLoading;
+}
+
 const safeName = (t) => String(t || 'Live Board').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Live Board';
 
 // Runs fn with page i as the board's page (without showing it), its blocks laid out, then switches back.
@@ -34,6 +49,30 @@ async function withPage(board, i, fn) {
     board.pi = keep;
     board.prepareBlocks();
   }
+}
+
+// Only your ink and Claude's blocks (no PDF page, no paper) on a transparent background, the size of the page: PNG bytes.
+async function inkLayer(board, widthPx = 1800) {
+  const s = board.pageSize();
+  const scale = widthPx / s.w;
+  const W = Math.round(s.w * scale), H = Math.round(s.h * scale);
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext('2d');
+  const paint = () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    board.skipBg = true;
+    try { board.drawContent(ctx, { z: scale, ox: 0, oy: 0 }, 1, { x: 0, y: 0, w: s.w, h: s.h }, false); }
+    finally { board.skipBg = false; }
+  };
+  paint();
+  let url;
+  try { url = cv.toDataURL('image/png'); }
+  catch { board.noImageBlocks = true; paint(); board.noImageBlocks = false; url = cv.toDataURL('image/png'); }
+  cv.width = cv.height = 0;
+  return url;
 }
 
 const PAPER_MM = { A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Square: [210, 210] };
@@ -136,6 +175,7 @@ export class Exporter {
     if (!pages.length) return this.panel.add('info', 'This session has nothing on its pages yet.');
     this.panel.status('Making the PDF…');
     try {
+      if (notebook && this.board.pages.some((p) => p.bg)) return await this.pdfOnOriginal(pages);
       const JsPDF = await loadJsPDF();
       if (notebook) {
         let doc;
@@ -171,6 +211,68 @@ export class Exporter {
     }
   }
 
+  // ---------- PDF notebook: your writing flattened onto the ORIGINAL PDF pages ----------
+  // Each PDF page is copied as it is (text stays text, same size), with a transparent picture of your ink and
+  // Claude's blocks drawn on top; blank pages you added are new pages at their own size, in place. The PDF stored
+  // in the app is never changed: this makes a new file.
+  async pdfOnOriginal(pages) {
+    const b = this.board;
+    const PDFLib = await loadPdfLib();
+    const { PDFDocument, degrees } = PDFLib;
+    const out = await PDFDocument.create();
+    const sources = new Map(); // pdf id -> PDFDocument or null (could not be read: then pages are pictures)
+    let pictures = 0;
+    for (const [k, { p, i }] of pages.entries()) {
+      this.panel.status(`Making the PDF: page ${k + 1} of ${pages.length}…`);
+      const hasInk = p.strokes.length || p.blocks.length;
+      if (p.bg) {
+        if (!sources.has(p.bg.pdf)) {
+          let src = null;
+          try {
+            const rec = await idb.get('library', p.bg.pdf);
+            if (rec?.data) src = await PDFDocument.load(rec.data.slice(0), { ignoreEncryption: true, updateMetadata: false });
+          } catch { src = null; }
+          sources.set(p.bg.pdf, src);
+        }
+        const src = sources.get(p.bg.pdf);
+        if (src && p.bg.page <= src.getPageCount()) {
+          const [page] = await out.copyPages(src, [p.bg.page - 1]);
+          out.addPage(page);
+          if (hasInk) {
+            const png = await withPage(b, i, () => inkLayer(b));
+            const img = await out.embedPng(png);
+            const cb = page.getCropBox();
+            const rot = ((page.getRotation().angle % 360) + 360) % 360;
+            // the picture is upright as you see the page; a rotated PDF page needs it drawn turned the other way
+            const place = {
+              0: { x: cb.x, y: cb.y, width: cb.width, height: cb.height, rotate: degrees(0) },
+              90: { x: cb.x + cb.width, y: cb.y, width: cb.height, height: cb.width, rotate: degrees(90) },
+              180: { x: cb.x + cb.width, y: cb.y + cb.height, width: cb.width, height: cb.height, rotate: degrees(180) },
+              270: { x: cb.x, y: cb.y + cb.height, width: cb.height, height: cb.width, rotate: degrees(270) },
+            }[rot] || { x: cb.x, y: cb.y, width: cb.width, height: cb.height };
+            page.drawImage(img, place);
+          }
+          continue;
+        }
+        // the original could not be read for copying (e.g. encrypted): the page as a picture, same size
+        await b.bgReady(p, 2000);
+        pictures++;
+      }
+      const s = b.pageSize(p);
+      const jpg = await withPage(b, i, () => notebookPage(b, 1800).url);
+      const page = out.addPage([(s.w * 72) / 96, (s.h * 72) / 96]);
+      const img = await out.embedJpg(jpg);
+      page.drawImage(img, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
+    }
+    out.setTitle(this.title());
+    out.setCreator('Live Board');
+    const bytes = await out.save();
+    const file = new File([bytes], `${safeName(this.title())}.pdf`, { type: 'application/pdf' });
+    const blanks = pages.filter(({ p }) => !p.bg).length;
+    this.panel.add('info', `PDF ready: ${pages.length} page(s) of "${this.title()}": your writing on the original PDF pages${blanks ? `, with ${blanks} added blank page(s) in place` : ''}.${pictures ? ` ${pictures} page(s) could not be copied from the original PDF (it may be protected) and are pictures instead.` : ''}`, { actions: fileButtons(this.panel, file), noLog: true });
+    return { ok: true, pages: pages.length };
+  }
+
   // ---------- LaTeX typed up by Claude ----------
   estimate(n) {
     const p = priceOf(settings.models.main);
@@ -186,13 +288,14 @@ export class Exporter {
     try {
       for (const [k, { i }] of pages.entries()) {
         this.panel.status(`Claude is typing up page ${k + 1} of ${pages.length}…`);
+        await this.board.bgReady(this.board.pages[i], 1600);
         const content = await withPage(this.board, i, (page) => {
           const snap = this.board.snapshot({ maxDim: 1600, maxScale: 2 });
           const mine = page.blocks.filter((b) => b.kind !== 'image' && b.lines?.length).map((b) => b.lines.join('\n'));
           const notes = (page.notebook || []).map((e) => `${e.latex}${e.description ? `   % ${e.description}` : ''}`);
           return [
             { type: 'image', source: { type: 'base64', media_type: snap.media_type, data: snap.b64 } },
-            { type: 'text', text: `Page "${page.name}".${mine.length ? `\nBlue typeset blocks on this page (exact LaTeX, written by the assistant):\n${mine.join('\n---\n')}` : ''}${notes.length ? `\nEarlier transcription notes for this page (may be incomplete):\n${notes.join('\n')}` : ''}\n\nType this page up.` },
+            { type: 'text', text: `Page "${page.name}".${page.bg ? ' This page is a printed PDF page with the user\'s handwriting on top: type up only the handwriting (and the blue blocks), not the print; mention the printed item it refers to only if needed for sense.' : ''}${mine.length ? `\nBlue typeset blocks on this page (exact LaTeX, written by the assistant):\n${mine.join('\n---\n')}` : ''}${notes.length ? `\nEarlier transcription notes for this page (may be incomplete):\n${notes.join('\n')}` : ''}\n\nType this page up.` },
           ];
         });
         const resp = await claude({ model: settings.models.main, system: TEX_SYSTEM, messages: [{ role: 'user', content }], max_tokens: 16000, purpose: 'export' });

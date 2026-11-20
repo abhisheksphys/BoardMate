@@ -8,6 +8,7 @@ import { settings } from './settings.js';
 import { claude, textOf, imageBlock } from './claude.js';
 import { TOOL_SCHEMAS, runTool } from './tools.js';
 import { fmt, overBudget } from './costs.js';
+import { pageText } from './pdfbg.js';
 
 const MAX_STEPS = 14;
 
@@ -57,6 +58,7 @@ Answering
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
 - Use search_library and show_page for the user's PDFs (the shared library plus this session's own materials).
 - ${s.webSearch ? 'web_search: when the user asks you to look something up (a paper, an arXiv preprint, a reference, a current value), search as much as it takes to find it. Without being asked, search only when the question needs current or outside facts (a recent measurement, a specific paper\'s result, a convention in a named source); never for textbook physics or derivations. Your citations are listed as sources under the answer automatically.' : 'Web search is turned off in settings: if a question needs it, say so.'}
+- A notebook can be made from a PDF: then a page may have a PDF page as its background (board_context.pdf_page: its printed text and where it is). The user writes on top; you never change the PDF. Blank pages may sit between PDF pages.
 - The session may have several pages; you see only the current one. board_context.other_pages lists the others (their notes and your blocks, as text). When a question needs another page ("look at page 3", "use the result from earlier", "compare with page 2"), call view_page for it. Use go:true only when the user asks to go to / open / show that page.
 - Work is organised in sessions. To bring something from another session ("the boundary conditions from yesterday"), call list_sessions, then read_session, then write it here.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
@@ -146,18 +148,30 @@ export class Agent {
     return { messages: out, historyEnd };
   }
 
-  buildTurn(text, { selection, origin }) {
+  async buildTurn(text, { selection, origin }) {
     const b = this.board;
     const max = settings.imageMaxPx || 1100;
+    // A page from a PDF: its printed text goes as text (exact small print, cheap), and the image is the page as you
+    // see it (print + your ink) around what you wrote; a page without a text layer (a scan) is sent whole.
+    let pdf = null;
+    if (b.page.bg) {
+      const bg = b.page.bg;
+      let printed = null;
+      try { printed = await pageText(bg); } catch {}
+      await b.bgReady(b.page, 1500);
+      pdf = { bg, printed, scanned: !printed || printed.text.replace(/\s/g, '').length < 40 };
+    }
     // With a selection, the selection carries the detail, so the full page can be smaller.
-    const snap = b.snapshot({ maxDim: selection ? Math.min(800, max) : max, maxScale: 1.5 });
+    const snap = pdf?.scanned
+      ? b.snapshot({ region: b.pageRect(), maxDim: max, maxScale: 1.5, pad: 0 })
+      : b.snapshot({ region: pdf ? this.pdfRegion() : null, maxDim: selection ? Math.min(800, max) : max, maxScale: 1.5 });
     this.lastSnap = snap;
     const content = [imageBlock(snap)];
     if (selection) content.push(imageBlock(b.snapshot({ region: selection, maxDim: max, maxScale: 2.5, pad: 12 })));
     const page = b.page;
     const ctx = {
       page: page.name,
-      session_type: b.layout ? `notebook: page ${b.pi + 1} of ${b.pages.length}, ${b.layout.size} ${b.layout.orient}; the image shows the page. Board writing stays on the page; what doesn't fit continues on the next page.` : 'freeform (an endless page)',
+      session_type: b.layout ? `notebook${b.layout.pdf ? ' from a PDF' : ''}: page ${b.pi + 1} of ${b.pages.length}, ${b.page.bg ? `PDF page ${b.page.bg.page} as background` : b.layout.pdf ? `a blank ${b.layout.size} page added between PDF pages` : `${b.layout.size} ${b.layout.orient}`}; the image shows the page. Board writing stays on the page; what doesn't fit continues on the next page.` : 'freeform (an endless page)',
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
       selection: selection ? { ...b.rectToImage(snap, selection), shape: selection.path ? 'lasso (only what is inside the outline)' : 'box' } : null,
@@ -167,14 +181,51 @@ export class Agent {
       other_pages: b.pages.length > 1 ? b.pages.map((p, i) => ({ p, i })).filter(({ i }) => i !== b.pi).map(({ p, i }) => ({
         page: i + 1,
         name: p.name,
-        empty: !p.strokes.length && !p.blocks.length,
+        pdf_page: p.bg?.page,
+        starred: p.starred || undefined,
+        empty: !p.strokes.length && !p.blocks.length ? (p.bg ? 'no writing yet (printed PDF page)' : true) : undefined,
         notes: (p.notebook || []).slice(0, 8).map((e) => String(e.description || e.latex).slice(0, 80)),
         your_blocks: p.blocks.filter((x) => x.kind !== 'image' && x.lines?.length).slice(0, 4).map((x) => x.lines.join(' ').slice(0, 80)),
       })) : undefined,
+      pdf_page: pdf ? this.pdfContext(pdf, snap) : undefined,
       input: origin,
     };
     content.push({ type: 'text', text: `<board_context>${JSON.stringify(ctx)}</board_context>\n\n${text}` });
     return content;
+  }
+
+  // What Claude gets about a PDF page: which page of which PDF, where the page is in the image, and the printed
+  // lines with their positions in image pixels (lines outside the image are on the page but not in the picture).
+  // On a PDF page: what you wrote plus the print just above and beside it (often the problem it answers).
+  pdfRegion() {
+    const b = this.board, cb = b.contentBounds(), pr = b.pageRect();
+    if (!cb) return null; // nothing written: the whole page
+    const x0 = Math.max(0, cb.x - 60), y0 = Math.max(0, cb.y - 180), x1 = Math.min(pr.w, cb.x + cb.w + 60), y1 = Math.min(pr.h, cb.y + cb.h + 40);
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  }
+
+  pdfContext({ bg, printed, scanned }, snap) {
+    const b = this.board;
+    const name = b.layout?.pdf?.name || 'PDF';
+    const out = {
+      source: `${name}, page ${bg.page}`,
+      page_in_image: b.rectToImage(snap, b.pageRect()),
+      note: scanned
+        ? 'This PDF page has no text layer (a scan): read it from the image. Your writing goes on the user\'s ink layer, never into the PDF; place it in empty space on the page.'
+        : 'The printed text of this PDF page is in printed_lines (exact; maths may be garbled there, so trust the image for formulas). The image shows the page with the user\'s ink around what they wrote; call get_region (any x,y,w,h in the same pixel units, also outside the image but inside page_in_image) to see other parts. Your writing goes on the user\'s ink layer, never into the PDF; place it in empty space (margins, gaps between printed lines).',
+    };
+    if (!scanned) {
+      let budget = 7000;
+      out.printed_lines = [];
+      for (const it of printed.items) {
+        if (budget <= 0) { out.printed_lines.push({ text: '…(more lines; use get_region to read the rest)' }); break; }
+        const t = it.text.slice(0, 300);
+        budget -= t.length + 24;
+        const r = b.rectToImage(snap, it);
+        out.printed_lines.push({ at: [r.x, r.y, r.w, r.h], text: t });
+      }
+    }
+    return out;
   }
 
   async ask(text, opts = {}) {
@@ -207,7 +258,7 @@ export class Agent {
     const tiersUsed = new Set();
     this.panel.status('Looking at your page…');
     try {
-      ex.push({ role: 'user', content: this.buildTurn(text, opts) });
+      ex.push({ role: 'user', content: await this.buildTurn(text, opts) });
       this.exchanges.push(ex);
       const ctx = { board: this.board, panel: this.panel, voice: this.voice, agent: this, changes: this.changes, sessions: this.sessions, exporter: this.exporter };
       for (let step = 0; step < MAX_STEPS; step++) {

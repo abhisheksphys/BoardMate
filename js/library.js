@@ -6,7 +6,7 @@ import { idb } from './storage.js';
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 let pdfjsPromise = null;
 
-function pdfjs() {
+export function pdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = new Promise((resolve, reject) => {
       if (window.pdfjsLib) return resolve(window.pdfjsLib);
@@ -25,7 +25,20 @@ function pdfjs() {
 
 // Books saved before sessions existed have no scope fields: they are shared.
 const isGlobal = (b) => b.global !== false;
-const visibleIn = (b, sessionId) => isGlobal(b) || (sessionId && (b.sessions || []).includes(sessionId));
+// PDF notebooks (pages you write on) live in the same store but are not reference material: they never show
+// in the library, its search, or Claude's search_library / show_page.
+const isNotebookPdf = (b) => b.kind === 'notebook';
+const visibleIn = (b, sessionId) => !isNotebookPdf(b) && (isGlobal(b) || (sessionId && (b.sessions || []).includes(sessionId)));
+
+// A PDF that becomes the pages of a notebook session: stored once, as given, never modified.
+export async function addNotebookPdf(file, sessionId) {
+  const lib = await pdfjs();
+  const buf = await file.arrayBuffer();
+  const doc = await lib.getDocument({ data: buf.slice(0) }).promise;
+  const id = `nbpdf-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  await idb.set('library', id, { id, kind: 'notebook', name: file.name, data: buf, pages: [], numPages: doc.numPages, added: Date.now(), global: false, sessions: [sessionId] });
+  return { id, doc, numPages: doc.numPages };
+}
 
 // sessionId given = add to that session only; omitted = add to the shared library.
 export async function addPdf(file, onProgress, { sessionId = null } = {}) {

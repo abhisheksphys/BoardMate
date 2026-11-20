@@ -11,7 +11,7 @@
   <title>Live Board</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2026.11.20-2346">
+  <link rel="stylesheet" href="styles.css?v=2026.11.21-0033">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -59,10 +59,15 @@
         <svg viewBox="0 0 64 48" aria-hidden="true"><rect x="22" y="6" width="28" height="38" rx="2" class="paper back"/><rect x="14" y="3" width="28" height="38" rx="2" class="paper"/><path d="M18 12h20M18 18h20M18 24h20M18 30h20M18 36h14" class="rule"/></svg>
         <b>Notebook</b><span>Fixed-size pages you flip through, like GoodNotes.</span>
       </button>
+      <button type="button" class="type-card" data-type="pdf">
+        <svg viewBox="0 0 64 48" aria-hidden="true"><rect x="22" y="6" width="28" height="38" rx="2" class="paper back"/><rect x="14" y="3" width="28" height="38" rx="2" class="paper"/><path d="M18 10h12M18 15h20M18 20h17" class="rule"/><path d="M19 30c4-5 7 3 10-1s5-3 8 0" class="ink"/><text x="42" y="44" class="tag">PDF</text></svg>
+        <b>Notebook from PDF</b><span>Each page of a PDF becomes a notebook page to write on. Add blank pages anywhere.</span>
+      </button>
     </div>
+    <input type="file" id="nsPdfFile" accept="application/pdf,.pdf" hidden>
     <div id="nsOptions" class="ns-options" hidden>
-      <div class="opt"><span>Page size</span><div class="seg" data-name="size"><button type="button" data-v="A4" class="on">A4</button><button type="button" data-v="A5">A5</button><button type="button" data-v="Letter">Letter</button><button type="button" data-v="Square">Square</button></div></div>
-      <div class="opt"><span>Orientation</span><div class="seg" data-name="orient">
+      <div class="opt nb-only"><span>Page size</span><div class="seg" data-name="size"><button type="button" data-v="A4" class="on">A4</button><button type="button" data-v="A5">A5</button><button type="button" data-v="Letter">Letter</button><button type="button" data-v="Square">Square</button></div></div>
+      <div class="opt nb-only"><span>Orientation</span><div class="seg" data-name="orient">
         <button type="button" data-v="portrait" class="on"><svg viewBox="0 0 20 20"><rect x="5" y="2" width="10" height="16" rx="1.5"/></svg>Portrait</button>
         <button type="button" data-v="landscape"><svg viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="10" rx="1.5"/></svg>Landscape</button></div></div>
       <div class="opt"><span>Paper</span><div class="seg" data-name="paper">
@@ -73,9 +78,22 @@
       <div class="opt"><span>Pages scroll</span><div class="seg" data-name="scroll">
         <button type="button" data-v="vertical" class="on"><svg viewBox="0 0 20 20"><path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4"/></svg>Up / down</button>
         <button type="button" data-v="horizontal"><svg viewBox="0 0 20 20"><path d="M3 10h14M7 6l-4 4 4 4M13 6l4 4-4 4"/></svg>Left / right</button></div></div>
-      <p class="hint">You can change all of this later in Settings → This session.</p>
+      <p class="hint" id="nsHint">You can change all of this later in Page setup.</p>
     </div>
     <footer><button type="button" class="ghost" id="nsCancel2">Cancel</button><button type="button" class="primary" id="nsCreate" disabled>Create</button></footer>
+  </dialog>
+  <dialog id="pagesDlg" class="sheet pages-sheet">
+    <header>
+      <h3>Pages <small id="pgCount"></small></h3>
+      <form id="pgGotoForm" class="pg-goto" novalidate><span>Go to page</span><input id="pgGoto" type="number" inputmode="numeric" aria-label="Page number"><span id="pgGotoOf"></span><button type="submit">Go</button></form>
+      <button type="button" class="sheet-x" id="pgClose" aria-label="Close">×</button>
+    </header>
+    <div class="pg-tools">
+      <input id="pgSearch" type="search" placeholder="Search pages: words or maths (∇·B, wave equation…)" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="pg-chips"><button type="button" class="chip active" id="pgAllChip">All</button><button type="button" class="chip" id="pgStarChip">★ Starred</button></div>
+    </div>
+    <div id="pgGrid" class="pg-grid"></div>
+    <footer><button type="button" class="ghost" id="pgAdd">＋ Add page at the end</button></footer>
   </dialog>
   <dialog id="pageSetupDlg" class="sheet">
     <header><h3>Page setup <small id="psKind"></small></h3><button type="button" class="sheet-x" id="psClose" aria-label="Close">×</button></header>
@@ -116,34 +134,36 @@
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.20-2346",
-  "./js/app.js": "./js/app.js?v=2026.11.20-2346",
-  "./js/backup.js": "./js/backup.js?v=2026.11.20-2346",
-  "./js/board.js": "./js/board.js?v=2026.11.20-2346",
-  "./js/bus.js": "./js/bus.js?v=2026.11.20-2346",
-  "./js/cas.js": "./js/cas.js?v=2026.11.20-2346",
-  "./js/changes.js": "./js/changes.js?v=2026.11.20-2346",
-  "./js/claude.js": "./js/claude.js?v=2026.11.20-2346",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.20-2346",
-  "./js/costs.js": "./js/costs.js?v=2026.11.20-2346",
-  "./js/export.js": "./js/export.js?v=2026.11.20-2346",
-  "./js/github.js": "./js/github.js?v=2026.11.20-2346",
-  "./js/images.js": "./js/images.js?v=2026.11.20-2346",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.20-2346",
-  "./js/library.js": "./js/library.js?v=2026.11.20-2346",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.20-2346",
-  "./js/panel.js": "./js/panel.js?v=2026.11.20-2346",
-  "./js/perception.js": "./js/perception.js?v=2026.11.20-2346",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.20-2346",
-  "./js/settings.js": "./js/settings.js?v=2026.11.20-2346",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.20-2346",
-  "./js/storage.js": "./js/storage.js?v=2026.11.20-2346",
-  "./js/tools.js": "./js/tools.js?v=2026.11.20-2346",
-  "./js/version.js": "./js/version.js?v=2026.11.20-2346",
-  "./js/voice.js": "./js/voice.js?v=2026.11.20-2346"
+  "./js/agent.js": "./js/agent.js?v=2026.11.21-0033",
+  "./js/app.js": "./js/app.js?v=2026.11.21-0033",
+  "./js/backup.js": "./js/backup.js?v=2026.11.21-0033",
+  "./js/board.js": "./js/board.js?v=2026.11.21-0033",
+  "./js/bus.js": "./js/bus.js?v=2026.11.21-0033",
+  "./js/cas.js": "./js/cas.js?v=2026.11.21-0033",
+  "./js/changes.js": "./js/changes.js?v=2026.11.21-0033",
+  "./js/claude.js": "./js/claude.js?v=2026.11.21-0033",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0033",
+  "./js/costs.js": "./js/costs.js?v=2026.11.21-0033",
+  "./js/export.js": "./js/export.js?v=2026.11.21-0033",
+  "./js/github.js": "./js/github.js?v=2026.11.21-0033",
+  "./js/images.js": "./js/images.js?v=2026.11.21-0033",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0033",
+  "./js/library.js": "./js/library.js?v=2026.11.21-0033",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0033",
+  "./js/pages.js": "./js/pages.js?v=2026.11.21-0033",
+  "./js/panel.js": "./js/panel.js?v=2026.11.21-0033",
+  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0033",
+  "./js/perception.js": "./js/perception.js?v=2026.11.21-0033",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0033",
+  "./js/settings.js": "./js/settings.js?v=2026.11.21-0033",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0033",
+  "./js/storage.js": "./js/storage.js?v=2026.11.21-0033",
+  "./js/tools.js": "./js/tools.js?v=2026.11.21-0033",
+  "./js/version.js": "./js/version.js?v=2026.11.21-0033",
+  "./js/voice.js": "./js/voice.js?v=2026.11.21-0033"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.20-2346"></script>
+  <script type="module" src="js/app.js?v=2026.11.21-0033"></script>
 </head>
 <body class="panel-right">
   <div id="errBar" role="alert" hidden><span></span><button type="button" onclick="location.reload()">Reload</button><button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true">✕</button></div>
@@ -206,6 +226,11 @@
   <main id="stage">
     <div id="boardWrap">
       <canvas id="board"></canvas>
+      <div id="pageBadge" class="page-badge" hidden>
+        <button type="button" id="pageBackBtn" class="pg-back" hidden title="Back to where you were">← Page 1</button>
+        <button type="button" id="pageStarBtn" class="pg-starbtn" title="Bookmark this page">☆</button>
+        <button type="button" id="pageBadgeBtn" title="All pages: jump, search, bookmarks, reorder" aria-label="Current page; tap for all pages"><b id="pageNow">1</b><span> / </span><span id="pageCount">1</span></button>
+      </div>
       <div id="aiChip" class="chip-float" hidden><span class="dot"></span><span>Claude is writing…</span><button id="stopBtn">Stop</button></div>
       <button id="askSel" class="chip-float ask-sel" hidden>Ask about the selection ↓</button>
       <div id="interim" hidden>

@@ -16,6 +16,7 @@ import { initImages } from './images.js';
 import { Sessions } from './sessions.js';
 import { Exporter } from './export.js';
 import { Backup } from './backup.js';
+import { PageNav } from './pages.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -86,7 +87,7 @@ $('#pageNext').addEventListener('click', () => board.goto(board.pi + 1));
 $('#pageNew').addEventListener('click', () => board.addPage());
 $('#pageLabel').addEventListener('click', () => {
   const name = prompt('Page name', board.page.name);
-  if (name) { board.page.name = name; emit('page', { page: board.page, index: board.pi, count: board.pages.length }); board.saveSoon(); }
+  if (name) { board.page.name = name; board.page.customName = true; emit('page', { page: board.page, index: board.pi, count: board.pages.length }); board.saveSoon(); }
 });
 function setPageLabel({ page, index, count }) {
   if (!page) return;
@@ -94,6 +95,9 @@ function setPageLabel({ page, index, count }) {
   $('#pageLabel').title = `${page.name} (page ${index + 1} of ${count}) — tap to rename`;
 }
 on('page', setPageLabel);
+
+// ---------- page navigation: floating page number, Back, bookmark star, Pages overview ----------
+window.livePages = new PageNav({ board, panel });
 
 
 $('#attention').addEventListener('change', (e) => setSettings({ attention: e.target.value }));

@@ -7,6 +7,7 @@ import { settings } from './settings.js';
 import { on, union } from './bus.js';
 import { claude, textOf, parseJSON, imageBlock } from './claude.js';
 import { overBudget, fmt } from './costs.js';
+import { textIn } from './pdfbg.js';
 
 const WATCH_SYSTEM = `You silently watch a scientist's handwritten whiteboard page. You get an image of the region that just changed (with a little context above it) and your notes about the rest of the page. Reply with ONE JSON object and nothing else:
 {"notebook_upsert":[{"key":"short-id","latex":"...","description":"a few words","x":0,"y":0}],
@@ -109,13 +110,19 @@ export class Perception {
     try {
       // The changed region plus some context above and around it.
       const region = { x: dirty.x - 60, y: dirty.y - 140, w: dirty.w + 120, h: dirty.h + 170 };
+      // A PDF page: the print under and around the new writing is in the picture, and its text goes along too.
+      let printed = '';
+      if (b.page.bg) {
+        await b.bgReady(b.page, 1500);
+        try { printed = (await textIn(b.page.bg, region)).slice(0, 2500); } catch {}
+      }
       const crop = b.snapshot({ region, maxDim: Math.min(900, settings.imageMaxPx || 900), maxScale: 2, pad: 0 });
       const content = [imageBlock(crop)];
       // First look at a page: also a small overview so the notes start complete.
       if (!b.page.notebook.length) content.push(imageBlock(b.snapshot({ maxDim: 700, maxScale: 1 })));
       content.push({
         type: 'text',
-        text: `${content.length > 1 ? 'Image 2 is a small overview of the whole page (for notes only; give coordinates in image 1). ' : ''}Notes about the page so far: ${this.notesText()}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.`,
+        text: `${content.length > 1 ? 'Image 2 is a small overview of the whole page (for notes only; give coordinates in image 1). ' : ''}${b.page.bg ? `This page is a printed PDF page the user writes on: the print is context (e.g. the problem being worked); check and note only the user's handwriting. ${printed ? `Printed text in image 1 (exact):\n${printed}\n` : ''}` : ''}Notes about the page so far: ${this.notesText()}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.`,
       });
       const effort = !live && settings.quietLowEffort ? 'low' : undefined;
       this.log(`looking (${live ? 'Live' : 'Quiet live'}${effort ? ', low effort' : ''}): changed area ${Math.round(dirty.w)}×${Math.round(dirty.h)}${content.length > 2 ? ' + page overview' : ''}`);
