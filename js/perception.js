@@ -37,6 +37,7 @@ export class Perception {
     this.voice = voice;
     this.agent = agent;
     this.events = [];
+    this.verified = new Map(); // line content -> the strong model's verdict on a suspected error there
     window.liveWatcher = this;
     this.pending = null;
     this.firstPendingAt = 0;
@@ -116,7 +117,8 @@ export class Perception {
         type: 'text',
         text: `${content.length > 1 ? 'Image 2 is a small overview of the whole page (for notes only; give coordinates in image 1). ' : ''}Notes about the page so far: ${this.notesText()}\nMode: ${live ? 'LIVE' : 'QUIET'}\nReturn the JSON only.`,
       });
-      this.log(`looking (${live ? 'Live' : 'Quiet live'}): changed area ${Math.round(dirty.w)}×${Math.round(dirty.h)}${content.length > 2 ? ' + page overview' : ''}`);
+      const effort = !live && settings.quietLowEffort ? 'low' : undefined;
+      this.log(`looking (${live ? 'Live' : 'Quiet live'}${effort ? ', low effort' : ''}): changed area ${Math.round(dirty.w)}×${Math.round(dirty.h)}${content.length > 2 ? ' + page overview' : ''}`);
       this.panel.status('Claude is looking at your writing…');
       const t0 = Date.now();
       const resp = await claude({
@@ -125,6 +127,7 @@ export class Perception {
         messages: [{ role: 'user', content }],
         max_tokens: 4000, // room for the model's own reasoning as well as the JSON (only what is used is paid for)
         purpose: 'watch',
+        effort,
       });
       const raw = textOf(resp);
       const j = parseJSON(raw);
@@ -160,11 +163,38 @@ export class Perception {
       let comment = j.comment || null;
       let spoken = j.spoken || null;
       if (settings.escalate && issues.some((i) => i.kind === 'error')) {
-        const v = await this.verify(crop, issues);
-        if (v) {
-          issues = Array.isArray(v.issues) ? v.issues : issues;
-          comment = v.comment ?? comment;
-          spoken = v.spoken ?? spoken;
+        // Each suspected error belongs to a line, identified by its content (its LaTeX in the notes).
+        // A suspicion on a line the strong model has already judged, unchanged since, reuses that verdict;
+        // any new or edited line is double-checked as before.
+        const keyOf = (i) => {
+          if (!Number.isFinite(i.x) || !Number.isFinite(i.y)) return null;
+          const w = b.imageToWorld(crop, i.x, i.y);
+          let best = null, bd = Infinity;
+          for (const e of b.page.notebook) if (Number.isFinite(e.y) && Math.abs(e.y - w.y) < bd) { bd = Math.abs(e.y - w.y); best = e; }
+          return best && bd < 50 ? `${pageId}|${best.latex.replace(/\s+/g, '')}` : null;
+        };
+        const errs = issues.filter((i) => i.kind === 'error');
+        const keys = errs.map(keyOf);
+        if (keys.every((k) => k && this.verified.has(k))) {
+          const others = issues.filter((i) => i.kind !== 'error');
+          issues = [...others, ...errs.flatMap((i, n) => { const v = this.verified.get(keys[n]); return v.keep ? [{ ...i, kind: v.kind, note: v.note }] : []; })];
+          if (!others.length) { comment = null; spoken = null; } // the comment on these was already given
+          this.log(`suspected error(s) on line(s) already double-checked and unchanged: reused the verdict (no extra call)`);
+        } else {
+          const v = await this.verify(crop, issues);
+          if (v) {
+            issues = Array.isArray(v.issues) ? v.issues : issues;
+            comment = v.comment ?? comment;
+            spoken = v.spoken ?? spoken;
+            const kept = issues.filter((i) => i.kind === 'error' || i.kind === 'warn');
+            errs.forEach((i, n) => {
+              if (!keys[n]) return;
+              const k = kept.find((q) => keyOf(q) === keys[n]);
+              this.verified.set(keys[n], k ? { keep: true, kind: k.kind, note: k.note } : { keep: false });
+            });
+            if (this.verified.size > 300) this.verified.delete(this.verified.keys().next().value);
+            this.log(`double-checked ${errs.length} suspected error(s) with the strong model: ${kept.length} kept`);
+          }
         }
       }
       if (b.page.id !== pageId) return;
@@ -227,7 +257,7 @@ export class Perception {
           role: 'user',
           content: [imageBlock(crop), { type: 'text', text: `Notes about the rest of the page: ${this.notesText()}\nSuspected issues (pixels in the image): ${JSON.stringify(issues)}\nReturn the JSON only.` }],
         }],
-        max_tokens: 800,
+        max_tokens: 4000, // room for the strong model's reasoning; only what is used is paid for
         purpose: 'verify',
       });
       return parseJSON(textOf(resp));

@@ -19,7 +19,9 @@ function markMessage(msg, long) {
  * cacheLast: also cache the end of the last message (short TTL) so tool-loop follow-ups reuse it.
  * Long-TTL breakpoints always come before the short one, as the API requires.
  */
-export async function claude({ model, system, messages, tools, max_tokens = 4096, signal, purpose = 'answer', cacheAt = [], cacheLast = false }) {
+const noEffort = new Set(); // models that rejected the effort setting: never sent again
+
+export async function claude({ model, system, messages, tools, max_tokens = 4096, signal, purpose = 'answer', cacheAt = [], cacheLast = false, effort }) {
   if (!settings.apiKey) throw new Error('Add your Anthropic API key in Settings (gear icon).');
   const long = !!settings.longCache;
   const msgs = messages.slice();
@@ -29,6 +31,7 @@ export async function claude({ model, system, messages, tools, max_tokens = 4096
   const body = { model, max_tokens, messages: msgs };
   if (system) body.system = [{ type: 'text', text: system, cache_control: cc(long) }];
   if (tools?.length) body.tools = tools;
+  if (effort && !noEffort.has(model)) body.output_config = { effort };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -47,6 +50,11 @@ export async function claude({ model, system, messages, tools, max_tokens = 4096
       const j = await res.json();
       msg += ' ' + (j.error?.message || JSON.stringify(j));
     } catch {}
+    // A model that doesn't take the effort setting: retry once without it (and stop sending it)
+    if (body.output_config && res.status === 400 && /effort|output_config/i.test(msg)) {
+      noEffort.add(model);
+      return claude({ model, system, messages, tools, max_tokens, signal, purpose, cacheAt, cacheLast });
+    }
     throw new Error('Claude API error: ' + msg);
   }
   const json = await res.json();

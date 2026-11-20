@@ -176,7 +176,7 @@ export class Sessions {
       const content = [];
       if (snap) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: snap } });
       content.push({ type: 'text', text: `Current title: ${title}\nNotes (equations on the page): ${JSON.stringify(notebook.slice(-30))}\nRecent chat:\n${chatText || '(none)'}\n\nReturn the JSON only.` });
-      const resp = await claude({ model: settings.models.fast, system: SUMMARY_SYSTEM, messages: [{ role: 'user', content }], max_tokens: 400, purpose: 'title' });
+      const resp = await claude({ model: settings.models.fast, system: SUMMARY_SYSTEM, messages: [{ role: 'user', content }], max_tokens: 3000, purpose: 'title' });
       const j = parseJSON(textOf(resp)) || {};
       const apply = (m) => {
         if (m.titleAuto && j.title) m.title = String(j.title).slice(0, 80);
@@ -544,7 +544,7 @@ export class Sessions {
       const list = (await this.allMetas()).filter((m) => !m.deletedAt).slice(0, 80).map((m) => ({
         id: m.id, title: m.title, subject: m.subject || undefined, summary: m.summary || undefined, notes: (m.searchText || '').slice(0, 500),
       }));
-      const resp = await claude({ model: settings.models.fast, system: FIND_SYSTEM, messages: [{ role: 'user', content: `Request: ${this.query}\nSessions: ${JSON.stringify(list)}\nReturn the JSON only.` }], max_tokens: 400, purpose: 'find' });
+      const resp = await claude({ model: settings.models.fast, system: FIND_SYSTEM, messages: [{ role: 'user', content: `Request: ${this.query}\nSessions: ${JSON.stringify(list)}\nReturn the JSON only.` }], max_tokens: 3000, purpose: 'find' });
       const j = parseJSON(textOf(resp));
       this.found = Array.isArray(j?.matches) ? j.matches.filter((x) => x && x.id) : [];
     } catch (e) {

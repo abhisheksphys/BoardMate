@@ -4,7 +4,7 @@ import { addPdf, listBooks, removeBook } from './library.js';
 import { escapeHtml } from './bus.js';
 import { VERSION } from './version.js';
 import { cachedModels, listModels, KNOWN_MODELS } from './claude.js';
-import { priceOf } from './costs.js';
+import { priceOf, meter, fmt } from './costs.js';
 
 const SECTIONS = [
   ['Claude', [
@@ -20,6 +20,7 @@ const SECTIONS = [
     { k: 'quietIdleSec', label: 'Quiet live: look after you pause for (seconds)', type: 'number' },
     { k: 'watchMaxWaitSec', label: 'While writing non-stop, look at least every (seconds)', type: 'number' },
     { k: 'escalate', label: 'Double-check suspected errors with the strong model', type: 'checkbox' },
+    { k: 'quietLowEffort', label: 'Quiet live: use low reasoning effort for looks (cheaper; check that Claude\'s notes and board requests stay accurate on your handwriting)', type: 'checkbox' },
     { k: 'boardRequests', label: 'Do what I write to Claude on the board (Live and Quiet live; e.g. "Write down the Lagrangian of the Standard Model")', type: 'checkbox' },
     { k: 'liveSpeak', label: 'Speak live comments aloud', type: 'checkbox' },
     { k: 'showMarks', label: 'Show margin marks', type: 'checkbox' },
@@ -127,6 +128,10 @@ export class SettingsUI {
             <div class="buttons"><button type="button" id="testVoice">Test voice</button><button type="button" id="copyVoiceLog">Copy voice log</button><button type="button" id="clearVoiceLog" class="ghost">Clear log</button></div>
             <div id="voiceLogMsg" class="muted small"></div>
           </fieldset>
+          <fieldset><legend>Where the money goes</legend>
+            <div id="costBreakdown" class="small"></div>
+            <div class="muted small">Estimated from token counts at list prices; the Claude Console usage page is the exact record. "This month" by purpose counts from this update on.</div>
+          </fieldset>
           <fieldset><legend>Watching log</legend>
             <div class="muted">What Live / Quiet live did: when it looked at your writing, and what came back (notes, marks, comments, board requests) or why it didn't look.</div>
             <div class="buttons"><button type="button" id="copyWatchLog">Copy watching log</button><button type="button" id="clearWatchLog" class="ghost">Clear log</button></div>
@@ -148,12 +153,26 @@ export class SettingsUI {
       </form>`;
     this.fillVoices();
     this.fillModels();
+    this.renderCosts();
     document.getElementById('set-apiKey')?.addEventListener('change', () => this.fillModels());
     this.renderSaved();
     this.renderBooks();
     this.renderFriction();
     this.bind();
     this.dlg.showModal();
+  }
+
+  renderCosts() {
+    const el = document.getElementById('costBreakdown');
+    if (!el) return;
+    const s = meter.stats();
+    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', title: 'Session titles and summaries', find: 'Session search', code: 'App changes' };
+    const rows = (by, total) => {
+      const list = Object.entries(by || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      if (!list.length) return '<div class="muted">Nothing yet.</div>';
+      return list.map(([k, v]) => `<div class="row"><span>${escapeHtml(NAMES[k] || k)}</span><span>${fmt(v)} · ${Math.round((100 * v) / (total || 1))}%</span></div>`).join('');
+    };
+    el.innerHTML = `<b>Today: ${fmt(s.today)}</b>${rows(s.byPurpose, s.today)}<br><b>This month: ${fmt(s.month)}</b>${rows(s.monthByPurpose, s.month)}<br><span class="muted">Since the app was opened: ${fmt(s.session)}</span>`;
   }
 
   // Replace the built-in model list with the live one from your account (keeps your choices).

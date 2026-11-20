@@ -184,7 +184,7 @@ export class Agent {
           system: systemPrompt(),
           messages: msgs,
           tools: TOOL_SCHEMAS,
-          max_tokens: this.tier === 'fast' ? 2048 : 4096,
+          max_tokens: this.tier === 'fast' ? 8000 : 16000, // includes Claude's reasoning; only what is used is paid for
           signal: this.abort.signal,
           purpose: 'answer',
           cacheAt: end >= 0 ? [end] : [],

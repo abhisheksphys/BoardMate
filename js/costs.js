@@ -33,7 +33,8 @@ function load() {
   let s;
   try { s = JSON.parse(localStorage.getItem(KEY)) || {}; } catch { s = {}; }
   if (s.day !== dayKey()) { s.day = dayKey(); s.today = { total: 0, by: {} }; }
-  if (s.month !== monthKey()) { s.month = monthKey(); s.monthTotal = 0; }
+  if (s.month !== monthKey()) { s.month = monthKey(); s.monthTotal = 0; s.monthBy = {}; }
+  s.monthBy ||= {};
   return s;
 }
 
@@ -45,6 +46,7 @@ export const meter = {
     s.today.total += c;
     s.today.by[purpose] = (s.today.by[purpose] || 0) + c;
     s.monthTotal += c;
+    s.monthBy[purpose] = (s.monthBy[purpose] || 0) + c;
     localStorage.setItem(KEY, JSON.stringify(s));
     this.session += c;
     emit('cost', { cost: c, purpose, model });
@@ -52,7 +54,7 @@ export const meter = {
   },
   stats() {
     const s = load();
-    return { session: this.session, today: s.today.total, byPurpose: s.today.by, month: s.monthTotal };
+    return { session: this.session, today: s.today.total, byPurpose: s.today.by, month: s.monthTotal, monthByPurpose: s.monthBy };
   },
 };
 

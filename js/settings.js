@@ -15,6 +15,7 @@ export const DEFAULTS = {
   quietIdleSec: 20, // Quiet live: look once you have paused this long
   watchMaxWaitSec: 60, // look at least this often while you keep writing
   escalate: true, // re-check suspected errors with the strong model
+  quietLowEffort: false, // Quiet live: ask the fast model for low reasoning effort (cheaper; test that notes stay accurate)
   boardRequests: true, // Live / Quiet live: do what you write on the board for Claude ("Write down the Lagrangian…")
   liveSpeak: false, // speak live comments aloud
 
@@ -76,7 +77,7 @@ export const DEFAULTS = {
 
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
-  'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'liveSpeak',
+  'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
