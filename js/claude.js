@@ -71,3 +71,35 @@ export const imageBlock = (snap) => ({
   type: 'image',
   source: { type: 'base64', media_type: snap.media_type || 'image/jpeg', data: snap.b64 },
 });
+
+// ---- models you can choose in Settings ----
+// Shown until (and if) the live list from your account can be fetched.
+export const KNOWN_MODELS = [
+  { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+  { id: 'claude-fable-5-2', name: 'Claude Fable 5.2' },
+];
+const MODELS_KEY = 'live-board-models';
+
+export function cachedModels() {
+  try {
+    const c = JSON.parse(localStorage.getItem(MODELS_KEY) || 'null');
+    if (c && Array.isArray(c.list) && c.list.length) return c.list;
+  } catch {}
+  return KNOWN_MODELS;
+}
+
+// Every model your API key can use, newest first (Anthropic's Models API). Free: no tokens are used.
+export async function listModels(apiKey = settings.apiKey) {
+  if (!apiKey) throw new Error('no API key');
+  const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const j = await res.json();
+  const list = (j.data || []).filter((m) => m && m.id).map((m) => ({ id: m.id, name: m.display_name || m.id }));
+  if (!list.length) throw new Error('empty list');
+  try { localStorage.setItem(MODELS_KEY, JSON.stringify({ at: Date.now(), list })); } catch {}
+  return list;
+}

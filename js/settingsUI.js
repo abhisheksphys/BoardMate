@@ -3,14 +3,16 @@ import { settings, saveSettings, getPath, setPath } from './settings.js';
 import { addPdf, listBooks, removeBook } from './library.js';
 import { escapeHtml } from './bus.js';
 import { VERSION } from './version.js';
+import { cachedModels, listModels, KNOWN_MODELS } from './claude.js';
+import { priceOf } from './costs.js';
 
 const SECTIONS = [
   ['Claude', [
     { k: 'apiKey', label: 'Anthropic API key', type: 'password', hint: 'Stored only in this browser.' },
     { k: 'routing', label: 'Which model answers', type: 'select', options: [['auto', 'Auto — fast model, hands harder questions to a stronger one (cheapest)'], ['main', 'Always the strong model'], ['deep', 'Always the deepest model (most expensive)']] },
-    { k: 'models.fast', label: 'Fast model (default answers, watching)' },
-    { k: 'models.main', label: 'Strong model (hand-offs, error checks)' },
-    { k: 'models.deep', label: 'Deepest model (hardest problems, app changes)' },
+    { k: 'models.fast', label: 'Fast model (default answers, watching)', type: 'model' },
+    { k: 'models.main', label: 'Strong model (hand-offs, error checks)', type: 'model' },
+    { k: 'models.deep', label: 'Deepest model (hardest problems, app changes)', type: 'model', hint: 'Prices are US dollars per million tokens, input / output.' },
   ]],
   ['Attention', [
     { k: 'attention', label: 'Mode', type: 'select', options: [['live', 'Live — watch and comment'], ['quiet', 'Quiet live — keep notes, speak only when asked'], ['demand', 'On demand — look only when asked (cheapest)']] },
@@ -76,10 +78,20 @@ function fieldHtml(f) {
   const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : '';
   if (f.type === 'checkbox') return `<label class="row check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> <span>${escapeHtml(f.label)}</span></label>`;
   if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
+  if (f.type === 'model') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}" data-model>${modelOptions(cachedModels(), v)}</select>${hint}</label>`;
   if (f.type === 'voice') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}"></select></label>`;
   if (f.type === 'lines') return `<label class="row"><span>${escapeHtml(f.label)}</span><textarea id="${id}" rows="4">${escapeHtml((v || []).join('\n'))}</textarea></label>`;
   const type = f.type || 'text';
   return `<label class="row"><span>${escapeHtml(f.label)}</span><input id="${id}" type="${type}" ${f.step ? `step="${f.step}"` : ''} value="${escapeHtml(v ?? '')}" autocomplete="off" autocapitalize="off" spellcheck="false">${hint}</label>`;
+}
+
+function modelOptions(list, current) {
+  const all = list.some((m) => m.id === current) || !current ? list : [{ id: current, name: current + ' (not in the list)' }, ...list];
+  return all.map((m) => {
+    // prices only for the current models the cost meter knows exactly
+    const p = KNOWN_MODELS.some((k) => k.id === m.id) ? priceOf(m.id) : null;
+    return `<option value="${escapeHtml(m.id)}" ${m.id === current ? 'selected' : ''}>${escapeHtml(m.name)}${p ? ` · $${p.in} / $${p.out}` : ''}</option>`;
+  }).join('');
 }
 
 function readField(f) {
@@ -131,11 +143,23 @@ export class SettingsUI {
         <footer><button value="cancel" class="ghost">Cancel</button><button id="saveSettings" value="save">Save</button></footer>
       </form>`;
     this.fillVoices();
+    this.fillModels();
+    document.getElementById('set-apiKey')?.addEventListener('change', () => this.fillModels());
     this.renderSaved();
     this.renderBooks();
     this.renderFriction();
     this.bind();
     this.dlg.showModal();
+  }
+
+  // Replace the built-in model list with the live one from your account (keeps your choices).
+  async fillModels() {
+    const key = document.getElementById('set-apiKey')?.value.trim() || settings.apiKey;
+    if (!key) return;
+    try {
+      const list = await listModels(key);
+      for (const sel of this.dlg.querySelectorAll('select[data-model]')) sel.innerHTML = modelOptions(list, sel.value);
+    } catch { /* offline or key not valid yet: the built-in list stays */ }
   }
 
   fillVoices() {
