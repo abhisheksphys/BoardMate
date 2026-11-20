@@ -27,14 +27,25 @@ class Voice {
     return String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
   }
 
-  // Removes `prefix` from the start of `text`, comparing words loosely (case, punctuation).
+  // Removes `prefix` (words already sent) from the start of `text`. Safari rewrites earlier words as it
+  // goes ("very good" → "pretty good"), so besides an exact match this also accepts a close one.
   static strip(text, prefix) {
-    if (!prefix) return text;
+    if (!prefix || !text) return text;
     const norm = Voice.norm;
     const words = text.split(/\s+/).filter(Boolean);
-    const n = prefix.split(/\s+/).filter(Boolean).length;
+    const pw = prefix.split(/\s+/).filter(Boolean);
+    const n = pw.length;
     if (words.length >= n && norm(words.slice(0, n).join(' ')) === norm(prefix)) return words.slice(n).join(' ');
     if (norm(prefix).startsWith(norm(text))) return ''; // only part of what was already sent
+    const tw = words.map(norm), pn = pw.map(norm);
+    if (tw.length >= n) {
+      const head = new Set(tw.slice(0, n + 2));
+      const match = pn.filter((w) => head.has(w)).length;
+      if (match / n >= 0.6) return words.slice(n).join(' ');
+    } else {
+      const ps = new Set(pn);
+      if (tw.filter((w) => ps.has(w)).length / tw.length >= 0.8) return '';
+    }
     return text;
   }
 
@@ -42,17 +53,22 @@ class Voice {
     return `${this.heard} ${this.runText}`.replace(/\s+/g, ' ').trim();
   }
 
+  // A fresh recogniser for every listening run. Safari keeps one transcript per run and keeps rewriting
+  // it, so after each send a new run starts with an empty transcript; anything the old run still
+  // reports is ignored (`mine()`), which is what stops earlier messages from being sent again.
   makeRec() {
     const r = new SR();
     r.lang = navigator.language || 'en-US';
     r.continuous = true;
     r.interimResults = true;
+    const mine = () => r === this.rec;
     // "ready" = Safari is actually hearing audio (not just asked to start). Some iPads only signal it
     // through the first result, so that counts too.
     const ready = (why) => { if (!this.ready) { this.ready = true; this.debug(why); emit('mic', this.state()); this.unlockSoon(); } };
-    r.onstart = () => ready('listening started');
-    r.onaudiostart = () => ready('microphone is on');
+    r.onstart = () => { if (mine()) ready('listening started'); };
+    r.onaudiostart = () => { if (mine()) ready('microphone is on'); };
     r.onresult = (e) => {
+      if (!mine()) return;
       ready('hearing you');
       if (this.isSpeaking()) this.cancelSpeech(); // barge-in: you talk, it stops
       // Rebuild from the whole result list each time: Safari re-sends and re-marks earlier words,
@@ -73,6 +89,10 @@ class Voice {
       this.runText = fresh;
       const shown = this.current();
       if (!shown) return; // nothing new: never show sent words again
+      // Safari also re-reports the same words during silence: that isn't speech, so it mustn't restart
+      // the "seconds of silence" countdown (otherwise automatic sending never happens).
+      if (shown === this.lastShown) return;
+      this.lastShown = shown;
       emit('interim', shown); // the bar only ever grows while you speak; it is never blanked mid-sentence
       if (settings.voiceIn === 'continuous' && settings.voiceSend !== 'manual') {
         clearTimeout(this.timer);
@@ -81,6 +101,7 @@ class Voice {
       }
     };
     r.onend = () => {
+      if (!mine()) return; // an old run we already replaced
       this.debug('listening run ended');
       this.listening = false;
       this.ready = false;
@@ -95,6 +116,7 @@ class Voice {
       } else if (this.want && !this.pausedForSpeech) setTimeout(() => this.startRec(), 250);
     };
     r.onerror = (e) => {
+      if (!mine()) return;
       this.debug('error: ' + e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         this.want = false;
@@ -112,7 +134,7 @@ class Voice {
 
   startRec() {
     if (!this.supported || this.listening) return;
-    this.rec ||= this.makeRec();
+    this.rec = this.makeRec();
     this.runText = '';
     this.runSent = '';
     this.ready = false;
@@ -127,8 +149,9 @@ class Voice {
     } catch (err) {
       // Safari sometimes isn't ready to start again yet: retry a few times, then start over with a fresh recogniser
       this.debug('could not start: ' + (err?.message || err));
-      if (++this.retries <= 5) setTimeout(() => this.startRec(), 300 * this.retries);
-      else { this.rec = null; this.retries = 0; if (this.want) setTimeout(() => this.startRec(), 500); }
+      this.rec = null;
+      if (++this.retries <= 6) setTimeout(() => { if (this.want || this.pushing) this.startRec(); }, 300 * this.retries);
+      else { this.retries = 0; this.want = false; emit('mic', this.state()); emit('voice-error', 'Safari would not start listening. Tap the mic to try again.'); }
     }
   }
 
@@ -157,11 +180,13 @@ class Voice {
   pushStart() {
     if (settings.voiceSend !== 'manual') this.heard = ''; // manual mode: each hold adds to what's waiting
     this.want = false;
+    this.pushing = true;
     this.cancelSpeech();
     this.startRec();
   }
 
   pushEnd() {
+    this.pushing = false;
     this.pushReleased = true;
     this.stopRec();
     clearTimeout(this.pushTimer);
@@ -171,6 +196,18 @@ class Voice {
         if (settings.voiceSend === 'manual') this.showHeld(); else this.flush();
       }
     }, 1500);
+  }
+
+  // Ends the current listening run and starts a new one with an empty transcript.
+  freshRun() {
+    if (!this.listening || !this.want) return; // hold-to-talk runs end on release anyway
+    const old = this.rec;
+    this.rec = null;
+    this.listening = false;
+    this.ready = false;
+    try { old?.abort(); } catch {}
+    this.debug('starting a fresh listening run');
+    setTimeout(() => { if (this.want && !this.listening && !this.pausedForSpeech) this.startRec(); }, 300);
   }
 
   showHeld() {
@@ -189,7 +226,8 @@ class Voice {
     this.runSent = `${this.runSent} ${this.runText}`.trim();
     this.heard = '';
     this.runText = '';
-    emit('interim', '');
+    this.lastShown = ''; emit('interim', '');
+    this.freshRun();
   }
 
   // ✎ in the speech bar: hand the text to the chat box instead of sending it
@@ -207,8 +245,9 @@ class Voice {
     this.runSent = `${this.runSent} ${this.runText}`.trim();
     this.heard = '';
     this.runText = '';
-    emit('interim', '');
+    this.lastShown = ''; emit('interim', '');
     if (!text) return;
+    this.freshRun(); // the next message starts from an empty transcript
     if (text === this.lastSent && Date.now() - this.lastSentAt < 6000) return; // same words delivered twice
     this.lastSent = text;
     this.lastSentAt = Date.now();

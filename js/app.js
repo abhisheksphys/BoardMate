@@ -150,7 +150,7 @@ on('voice-error', (m) => panel.add('error', m));
 // Visible proof that the mic is actually listening, and optional step-by-step diagnostics.
 on('mic', (st) => {
   if (agent.busy) return;
-  panel.status(st.listening ? (st.ready ? '🎙 Listening…' : '🎙 Starting the mic…') : st.want ? '🎙 Restarting…' : '');
+  panel.status(st.listening ? (st.ready ? '🎙 Listening…' : '🎙 Starting the mic…') : st.want ? '🎙 Starting the mic…' : '');
 });
 on('voice-debug', (m) => panel.add('info', `🎙 ${m}`, { noLog: true }));
 on('speaking', (v) => $('#voiceOutBtn').classList.toggle('speaking', v));
