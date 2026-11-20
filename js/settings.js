@@ -32,6 +32,7 @@ export const DEFAULTS = {
   headphones: false, // true = keep listening while AI speaks (enables barge-in)
   voiceSend: 'auto', // auto = send after a pause | manual = wait for the ↑ button in the speech bar
   voiceSendDelaySec: 1.4, // auto mode: seconds of silence before sending
+  voiceWatchdogSec: 8, // refresh a silent listening run after this many seconds (Safari sometimes stops hearing)
   voiceDebug: false, // show what speech recognition is doing in the panel status line
   voiceOut: true,
   voiceName: '',

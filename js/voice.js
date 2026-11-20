@@ -17,6 +17,30 @@ class Voice {
     this.lastSent = '';
     this.lastSentAt = 0;
     this.retries = 0;
+    this.lastActivity = 0;
+    this.lastStartAttempt = 0;
+    // Safari's recogniser on iPad sometimes dies silently (stops hearing, never says it ended), and iOS
+    // sometimes never reports that spoken output finished. A small watchdog notices both and recovers.
+    setInterval(() => this.watch(), 1500);
+  }
+
+  watch() {
+    if (!this.want || !this.supported) return;
+    const now = Date.now();
+    if (this.pausedForSpeech) {
+      // waiting for Claude's voice to finish: resume if it has actually stopped
+      if (this.isSpeaking()) { this.quietSince = 0; return; }
+      this.quietSince ||= now;
+      if (now - this.quietSince > 1500) { this.debug('speech output ended without notice: listening again'); this.pausedForSpeech = false; this.quietSince = 0; this.startRec(); }
+      return;
+    }
+    if (!this.listening) {
+      if (now - this.lastStartAttempt > 2500) { this.debug('mic was meant to be on but was not listening: restarting'); this.startRec(); }
+      return;
+    }
+    // listening, nothing waiting, and no sign of life for a while: the run may be dead, start a fresh one
+    const idle = Math.max(4, Number(settings.voiceWatchdogSec) || 8) * 1000;
+    if (!this.runText && now - this.lastActivity > idle) { this.debug('no sound for a while: refreshing the listening run'); this.freshRun(); }
   }
 
   debug(msg) {
@@ -65,10 +89,11 @@ class Voice {
     // "ready" = Safari is actually hearing audio (not just asked to start). Some iPads only signal it
     // through the first result, so that counts too.
     const ready = (why) => { if (!this.ready) { this.ready = true; this.debug(why); emit('mic', this.state()); this.unlockSoon(); } };
-    r.onstart = () => { if (mine()) ready('listening started'); };
-    r.onaudiostart = () => { if (mine()) ready('microphone is on'); };
+    r.onstart = () => { if (mine()) { this.lastActivity = Date.now(); ready('listening started'); } };
+    r.onaudiostart = () => { if (mine()) { this.lastActivity = Date.now(); ready('microphone is on'); } };
     r.onresult = (e) => {
       if (!mine()) return;
+      this.lastActivity = Date.now();
       ready('hearing you');
       if (this.isSpeaking()) this.cancelSpeech(); // barge-in: you talk, it stops
       // Rebuild from the whole result list each time: Safari re-sends and re-marks earlier words,
@@ -134,6 +159,8 @@ class Voice {
 
   startRec() {
     if (!this.supported || this.listening) return;
+    this.lastStartAttempt = Date.now();
+    this.lastActivity = Date.now();
     this.rec = this.makeRec();
     this.runText = '';
     this.runSent = '';
@@ -201,6 +228,7 @@ class Voice {
   // Ends the current listening run and starts a new one with an empty transcript.
   freshRun() {
     if (!this.listening || !this.want) return; // hold-to-talk runs end on release anyway
+    if (this.runText) { this.heard = this.current(); this.runText = ''; } // keep anything not yet sent
     const old = this.rec;
     this.rec = null;
     this.listening = false;
@@ -268,6 +296,8 @@ class Voice {
     this.unlocked = true;
     const u = new SpeechSynthesisUtterance(' ');
     u.volume = 0;
+    // playing audio can switch iOS out of recording mode: start a fresh listening run afterwards
+    u.onend = () => { if (this.want && this.listening) this.freshRun(); };
     speechSynthesis.speak(u);
   }
 
@@ -303,7 +333,7 @@ class Voice {
         if (this.pausedForSpeech) {
           this.pausedForSpeech = false;
           if (this.want) this.startRec();
-        }
+        } else if (this.want && this.listening) this.freshRun(); // with headphones: listening may have been knocked out
       }, 50);
     };
     u.onend = done;

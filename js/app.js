@@ -20,6 +20,7 @@ const $ = (s) => document.querySelector(s);
 // ---------- core objects ----------
 const board = new Board($('#board'));
 window.liveBoard = board; // handy for debugging from the browser console
+window.liveVoice = voice;
 let agent;
 const panel = new Panel({
   onSend: (text) => askFrom(text, 'typed'),
