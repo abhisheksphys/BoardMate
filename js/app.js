@@ -114,18 +114,12 @@ const mic = $('#micBtn');
 function updateMic() {
   const st = voice.state();
   mic.classList.toggle('on', st.listening || st.want);
-  mic.title = !voice.supported ? 'Speech recognition is not available in this browser' : settings.voiceIn === 'push' ? 'Hold to talk' : settings.voiceIn === 'continuous' ? 'Tap to start/stop listening' : 'Voice input is off (Settings)';
-  mic.disabled = !voice.supported || settings.voiceIn === 'off';
+  mic.title = !voice.supported ? 'Speech recognition is not available in this browser' : st.want ? 'Listening: tap to stop' : 'Tap to start listening';
+  mic.disabled = !voice.supported;
 }
-mic.addEventListener('pointerdown', (e) => {
-  // Don't unlock speech output here: on iOS that switches audio to playback just as listening starts,
-  // and the mic then hears nothing for a while. It is unlocked on any other tap, or just after listening is up.
-  if (settings.voiceIn === 'push') { e.preventDefault(); mic.setPointerCapture(e.pointerId); voice.pushStart(); mic.classList.add('on'); }
-});
-const endPush = () => { if (settings.voiceIn === 'push' && voice.listening) voice.pushEnd(); };
-mic.addEventListener('pointerup', endPush);
-mic.addEventListener('pointercancel', endPush);
-mic.addEventListener('click', () => { if (settings.voiceIn === 'continuous') voice.toggleContinuous(); });
+// Tap on = listening until you tap again. (Speech output is not unlocked on this tap: on iOS that
+// switches audio to playback just as listening starts, and the mic then hears nothing for a while.)
+mic.addEventListener('click', () => voice.toggleContinuous());
 on('mic', updateMic);
 on('utterance', (text) => askFrom(text, 'voice'));
 // The speech bar: what you're saying, live. In "send manually" mode it keeps everything you say
@@ -207,7 +201,6 @@ function applySettings() {
   updateMic();
   board.render();
   updateCost();
-  if (settings.voiceIn !== 'continuous' && voice.want) voice.stopAll();
 }
 on('settings', applySettings);
 applySettings();

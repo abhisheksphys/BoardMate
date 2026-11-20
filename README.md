@@ -14,7 +14,7 @@ A handwriting whiteboard for iPad where Claude watches the page, listens, answer
 ## Using it
 
 - **Write** with the Pencil. Fingers pan and pinch-zoom. Tools: pen, eraser, select (draw a box to point at something, or drag Claude's blocks).
-- **Ask** any way you like: type, hold the mic, or tap a saved action. Refer to things naturally — "the one that looks like Maxwell's equation", "my last line", "this" with a selection. There are no fixed commands.
+- **Ask** any way you like: type, tap the mic and talk, or tap a saved action. Refer to things naturally — "the one that looks like Maxwell's equation", "my last line", "this" with a selection. There are no fixed commands.
 - **Attention** (toolbar): *Live* checks new work as you write and puts ✓ ! ✗ marks in the margin (tap a mark to read it); *Quiet live* watches but only speaks when asked; *On demand* looks only when you ask.
 - **Claude writes on the board** in blue when you ask it to; the board locks briefly while it writes (Stop button to cancel). Erase, move, or write over its blocks freely; Undo removes them.
 - **Exact math** (curl, expand, solve, …) runs in SymPy inside the browser, loaded on first use (about 20 MB, cached afterwards).
@@ -36,7 +36,7 @@ A handwriting whiteboard for iPad where Claude watches the page, listens, answer
 
 - Safari asks for microphone permission the first time.
 - Without headphones, Claude pauses listening while it speaks (so it does not hear itself). With headphones, turn on *Using headphones* and you can interrupt it mid-sentence.
-- *Always listening* sends everything you say; set a wake word (e.g. "Claude") if you talk to yourself while working.
+- Tap the mic to start listening and tap it again to stop. While it is on, everything you say is sent; set a wake word (e.g. "Claude") if you talk to yourself while working.
 
 ## Running costs
 

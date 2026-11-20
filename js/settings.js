@@ -27,7 +27,6 @@ export const DEFAULTS = {
   longCache: true, // keep cached context for 1 hour instead of 5 minutes
 
   // Voice
-  voiceIn: 'push', // off | push | continuous
   wakeWord: '',
   headphones: false, // true = keep listening while AI speaks (enables barge-in)
   voiceSend: 'auto', // auto = send after a pause | manual = wait for the ↑ button in the speech bar
@@ -79,7 +78,7 @@ export const DEFAULTS = {
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'liveSpeak',
-  'voiceIn', 'voiceSend', 'voiceSendDelaySec', 'voiceFreshRuns', 'voiceWatchdogSec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
+  'voiceSend', 'voiceSendDelaySec', 'voiceFreshRuns', 'voiceWatchdogSec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
@@ -104,6 +103,7 @@ function load() {
 }
 
 export const settings = load();
+delete settings.voiceIn; // old setting: the mic is now always tap-on / tap-off
 
 export function saveSettings() {
   localStorage.setItem(KEY, JSON.stringify(settings));

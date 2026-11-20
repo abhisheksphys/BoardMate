@@ -219,7 +219,7 @@ export class Sessions {
     for (const m of this.chat) this.panel.add(m.role, m.md, { noLog: true, actions: m.role === 'assistant' ? this.agent.answerActions(m.md) : undefined });
     if (meta.recap) this.panel.add('recap', `**Where you left off:** ${meta.recap}`, { noLog: true });
     else if (!this.chat.length) {
-      this.panel.add('info', 'A fresh session. Write on the page, then ask about it: type below, hold the mic, or tap a button. Select a region with ⬚ to point at something.', { noLog: true });
+      this.panel.add('info', 'A fresh session. Write on the page, then ask about it: type below, tap the mic and talk, or tap a button. Select a region with ⬚ to point at something.', { noLog: true });
     }
     this.loading = false;
     this.contentChanged = false;

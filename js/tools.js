@@ -93,7 +93,7 @@ export const TOOL_SCHEMAS = [
     name: 'update_settings',
     description:
       `Change app settings immediately. Allowed keys: ${AI_EDITABLE.join(', ')}. ` +
-      'attention: live|quiet|demand. voiceIn: off|push|continuous. panelPosition: right|left|bottom|float|hidden. customInstructions: array of standing instructions for you. ' +
+      'attention: live|quiet|demand. panelPosition: right|left|bottom|float|hidden. customInstructions: array of standing instructions for you. ' +
       'Only use when the user asked for the change or agreed to your suggestion.',
     input_schema: { type: 'object', properties: { patch: { type: 'object' }, reason: { type: 'string' } }, required: ['patch'] },
   },

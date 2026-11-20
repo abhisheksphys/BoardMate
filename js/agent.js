@@ -47,7 +47,7 @@ Changing the app itself
 - For features or fixes that need code, call propose_code_change with a clear request; the user approves the pull request before anything changes. Call ship_change or roll_back only when the user explicitly asks; they still confirm with a button.
 - Call log_friction when something went wrong or you could not do what was asked.
 
-Current state: attention=${s.attention}, voiceIn=${s.voiceIn}, voiceOut=${s.voiceOut}, boardWriting=${s.allowBoardWrite}, panel=${s.panelPosition}.${custom}`;
+Current state: attention=${s.attention}, voiceOut=${s.voiceOut}, boardWriting=${s.allowBoardWrite}, panel=${s.panelPosition}.${custom}`;
 }
 
 // Old turns: drop images and shorten long tool outputs. Done once per turn, so the cached prefix stays identical afterwards.

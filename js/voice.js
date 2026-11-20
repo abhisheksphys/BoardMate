@@ -8,12 +8,11 @@ class Voice {
   constructor() {
     this.supported = !!SR;
     this.listening = false;
-    this.want = false; // continuous mode is on
+    this.want = false; // the mic is switched on
     this.heard = ''; // text from earlier recognition runs that hasn't been sent yet
     this.runText = ''; // what the current run has recognised and not yet sent
     this.runSent = ''; // what the current run recognised that was already sent
     this.pausedForSpeech = false;
-    this.pushReleased = false;
     this.lastSent = '';
     this.lastSentAt = 0;
     this.retries = 0;
@@ -64,7 +63,7 @@ class Voice {
   }
 
   report() {
-    const keys = ['voiceIn', 'voiceSend', 'voiceSendDelaySec', 'voiceFreshRuns', 'voiceWatchdogSec', 'headphones', 'voiceOut', 'narration', 'liveSpeak', 'wakeWord'];
+    const keys = ['voiceSend', 'voiceSendDelaySec', 'voiceFreshRuns', 'voiceWatchdogSec', 'headphones', 'voiceOut', 'narration', 'liveSpeak', 'wakeWord'];
     const conf = keys.map((k) => `${k}=${JSON.stringify(settings[k])}`).join(' ');
     return [
       'Live Board voice log',
@@ -187,7 +186,7 @@ class Voice {
       if (shown === this.lastShown) return;
       this.lastShown = shown;
       emit('interim', shown); // the bar only ever grows while you speak; it is never blanked mid-sentence
-      if (settings.voiceIn === 'continuous' && settings.voiceSend !== 'manual') {
+      if (settings.voiceSend !== 'manual') {
         clearTimeout(this.timer);
         const delay = Math.max(0.5, Math.min(15, Number(settings.voiceSendDelaySec) || 1.4));
         this.timer = setTimeout(() => this.flush(), delay * 1000);
@@ -205,10 +204,7 @@ class Voice {
       this.skip = null;
       this.lastResults = [];
       emit('mic', this.state());
-      if (this.pushReleased) {
-        this.pushReleased = false;
-        if (settings.voiceSend === 'manual') this.showHeld(); else this.flush();
-      } else if (this.want && !this.pausedForSpeech) setTimeout(() => this.startRec('run ended by Safari'), 250);
+      if (this.want && !this.pausedForSpeech) setTimeout(() => this.startRec('run ended by Safari'), 250);
     };
     r.onerror = (e) => {
       if (!mine()) return;
@@ -224,7 +220,7 @@ class Voice {
   }
 
   state() {
-    return { listening: this.listening, ready: !!this.ready, want: this.want, mode: settings.voiceIn, speaking: this.isSpeaking() };
+    return { listening: this.listening, ready: !!this.ready, want: this.want, speaking: this.isSpeaking() };
   }
 
   startRec(reason = 'unspecified') {
@@ -250,7 +246,7 @@ class Voice {
       // Safari sometimes isn't ready to start again yet: retry a few times, then start over with a fresh recogniser
       this.debug('could not start: ' + (err?.name || '') + ' ' + (err?.message || err));
       this.rec = null;
-      if (++this.retries <= 6) setTimeout(() => { if (this.want || this.pushing) this.startRec('retry after failed start'); }, 300 * this.retries);
+      if (++this.retries <= 6) setTimeout(() => { if (this.want) this.startRec('retry after failed start'); }, 300 * this.retries);
       else { this.retries = 0; this.want = false; emit('mic', this.state()); emit('voice-error', 'Safari would not start listening. Tap the mic to try again.'); }
     }
   }
@@ -278,27 +274,6 @@ class Voice {
     emit('mic', this.state());
   }
 
-  pushStart() {
-    if (settings.voiceSend !== 'manual') this.heard = ''; // manual mode: each hold adds to what's waiting
-    this.want = false;
-    this.pushing = true;
-    this.cancelSpeech();
-    this.startRec('mic held');
-  }
-
-  pushEnd() {
-    this.pushing = false;
-    this.pushReleased = true;
-    this.stopRec('mic released');
-    clearTimeout(this.pushTimer);
-    this.pushTimer = setTimeout(() => {
-      if (this.pushReleased) {
-        this.pushReleased = false;
-        if (settings.voiceSend === 'manual') this.showHeld(); else this.flush();
-      }
-    }, 1500);
-  }
-
   // After sending (or discarding) words: either start a fresh run, or keep the run and mark what was used.
   consumed(reason) {
     if (settings.voiceFreshRuns) return this.freshRun(reason);
@@ -311,7 +286,7 @@ class Voice {
 
   // Ends the current listening run and starts a new one with an empty transcript.
   freshRun(reason = 'unspecified') {
-    if (!this.listening || !this.want) return; // hold-to-talk runs end on release anyway
+    if (!this.listening || !this.want) return;
     if (this.runText) { this.heard = this.current(); this.runText = ''; } // keep anything not yet sent
     const old = this.rec;
     this.rec = null;
@@ -366,7 +341,7 @@ class Voice {
     this.lastSentAt = Date.now();
     this.debug('sent: ' + text);
     this.log('app: message sent', `"${text.slice(0, 60)}"`);
-    if (settings.voiceIn === 'continuous' && settings.wakeWord) {
+    if (settings.wakeWord) {
       const w = settings.wakeWord.toLowerCase();
       const i = text.toLowerCase().indexOf(w);
       if (i < 0) return;
