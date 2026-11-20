@@ -105,7 +105,7 @@ export class SettingsUI {
           ${intro}
           ${SECTIONS.map(([title, fields]) => `<fieldset><legend>${escapeHtml(title)}</legend>${fields.map(fieldHtml).join('')}</fieldset>`).join('')}
           <fieldset><legend>Saved action buttons</legend><div id="savedList"></div></fieldset>
-          <fieldset><legend>Library (your PDFs)</legend>
+          <fieldset><legend>Shared library (PDFs every session can use)</legend><div class="muted">PDFs for just one session go in that session's 📎 materials, in the Claude panel.</div>
             <div id="bookList" class="list"></div>
             <label class="row"><span>Add PDFs</span><input type="file" id="pdfInput" accept="application/pdf" multiple></label>
             <div id="pdfProgress" class="muted"></div>
@@ -141,7 +141,7 @@ export class SettingsUI {
 
   async renderBooks() {
     const el = document.getElementById('bookList');
-    const books = await listBooks();
+    const books = await listBooks(null, { only: 'global' });
     el.innerHTML = books.map((b) => `<div class="item"><span>${escapeHtml(b.name)} · ${b.pages} pages</span><button type="button" class="ghost" data-del-book="${escapeHtml(b.id)}">Remove</button></div>`).join('') || '<div class="muted">No PDFs yet.</div>';
   }
 
@@ -167,7 +167,7 @@ export class SettingsUI {
         this.renderSaved();
       }
       const b = e.target.closest('[data-del-book]');
-      if (b && confirm('Remove this PDF from the library?')) {
+      if (b && confirm('Remove this PDF from the shared library? Sessions that added it themselves keep it.')) {
         await removeBook(b.dataset.delBook);
         this.renderBooks();
       }

@@ -21,6 +21,7 @@ function systemPrompt() {
 Understanding the board
 - Read the page images directly, the way you would read a photo of notes or a book page. The user refers to things freely ("the one that looks like Maxwell's equation", "my second line", "what I just crossed out", "this" while something is selected). Work out what they mean from the image; ask only if it is genuinely ambiguous.
 - Blue typeset blocks with a thin bar on their left are things you wrote earlier. Small circled symbols are margin marks.
+- Pictures on the page (figures, photos, screenshots, book pages) were pasted by the user; read them as part of the page.
 - A dashed blue rectangle (and the second image, when present) is the user's current selection: "this" usually means it.
 - If something is too small or messy to read, call get_region for a sharper view.
 - Speech-to-text garbles math words ("curls" for curl, "dell" for del, "partial tea" for partial t); interpret charitably.
@@ -31,7 +32,8 @@ Answering
 - When the user asks you to write, continue, fill in, or put something on the board, use write_on_canvas${s.allowBoardWrite ? '' : ' (currently turned off: say so and answer in the panel)'}. Place it next to what it relates to. Keep board content short: equations and brief labels.
 - Use annotate to flag a specific spot (an error, a check, a note).
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
-- Use search_library and show_page for the user's own PDFs.
+- Use search_library and show_page for the user's PDFs (the shared library plus this session's own materials).
+- Work is organised in sessions. To bring something from another session ("the boundary conditions from yesterday"), call list_sessions, then read_session, then write it here.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
 - Be concise and precise. The user is an expert; skip basics and preamble. Shorter answers also cost less.
 
@@ -115,6 +117,7 @@ export class Agent {
     const page = b.page;
     const ctx = {
       page: page.name,
+      session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
       selection: selection ? b.rectToImage(snap, selection) : null,
       your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
@@ -156,7 +159,7 @@ export class Agent {
     try {
       ex.push({ role: 'user', content: this.buildTurn(text, opts) });
       this.exchanges.push(ex);
-      const ctx = { board: this.board, panel: this.panel, voice: this.voice, agent: this, changes: this.changes };
+      const ctx = { board: this.board, panel: this.panel, voice: this.voice, agent: this, changes: this.changes, sessions: this.sessions };
       for (let step = 0; step < MAX_STEPS; step++) {
         tiersUsed.add(this.tier);
         this.panel.status(`Thinking (${TIER_NAMES[this.tier]})…`);

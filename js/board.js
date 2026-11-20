@@ -194,6 +194,7 @@ export class Board {
     this.undoStack = [];
     this.redoStack = [];
     this.selection = null;
+    this.activeBlock = null;
     this.prepareBlocks();
     this.render();
     emit('page', { page: this.page, index: i, count: this.pages.length });
@@ -322,11 +323,35 @@ export class Board {
       this.eraserCursor = w;
       this.eraseAt(w);
     } else if (this.tool === 'select') {
-      const b = this.hitBlock(w);
-      if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w };
-      else this.drawing = { ...base, sel: { x0: w.x, y0: w.y } };
+      const a = this.activeBlock;
+      if (a && a.kind === 'image' && this.page.blocks.includes(a) && this.hitHandle(a, w)) {
+        // drag the corner handle to resize (keeps the image's proportions)
+        this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h }, start: w };
+      } else {
+        const b = this.hitBlock(w);
+        this.activeBlock = b;
+        if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w };
+        else this.drawing = { ...base, sel: { x0: w.x, y0: w.y } };
+      }
     }
     this.renderLive();
+  }
+
+  hitHandle(b, w) {
+    const r = 18 / this.page.view.z;
+    return Math.hypot(w.x - (b.x + b.w), w.y - (b.y + b.h)) < r;
+  }
+
+  deleteActiveBlock() {
+    const b = this.activeBlock;
+    if (!b || !this.page.blocks.includes(b)) return false;
+    this.page.blocks = this.page.blocks.filter((x) => x !== b);
+    this.pushUndo({ remove: { blocks: [b] } });
+    this.activeBlock = null;
+    this.markDirty({ x: b.x, y: b.y, w: b.w || 1, h: b.h || 1 });
+    this.render();
+    this.saveSoon();
+    return true;
   }
 
   onMove(e) {
@@ -353,6 +378,11 @@ export class Board {
       if (d.stroke) this.addPoint(d.stroke, w, ev.pressure, true);
       else if (d.erase) { this.eraserCursor = w; this.eraseAt(w); }
       else if (d.move) { d.move.x = d.from.x + w.x - d.start.x; d.move.y = d.from.y + w.y - d.start.y; }
+      else if (d.resize) {
+        const nw = Math.max(30 / this.page.view.z, d.from.w + (w.x - d.start.x));
+        d.resize.w = nw;
+        d.resize.h = (nw * d.from.h) / d.from.w;
+      }
       else if (d.sel) { d.sel.x1 = w.x; d.sel.y1 = w.y; }
     }
     if (d.stroke) {
@@ -361,7 +391,7 @@ export class Board {
       const last = d.stroke.points[d.stroke.points.length - 1];
       d.predicted = pred.slice(0, 3).map((ev) => { const p = this.evtPos(ev); const w = this.toWorld(p.sx, p.sy); return [w.x, w.y, last[2]]; });
     }
-    if (d.move) this.render();
+    if (d.move || d.resize) this.render();
     else this.renderLive();
   }
 
@@ -398,6 +428,13 @@ export class Board {
     } else if (d.move) {
       if (d.move.x !== d.from.x || d.move.y !== d.from.y) {
         this.pushUndo({ move: { id: d.move.id, from: d.from, to: { x: d.move.x, y: d.move.y } } });
+        this.markDirty({ x: d.move.x, y: d.move.y, w: d.move.w || 1, h: d.move.h || 1 });
+      }
+    } else if (d.resize) {
+      const b = d.resize;
+      if (b.w !== d.from.w) {
+        this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h } } });
+        this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h });
       }
     } else if (d.sel) {
       const s = d.sel;
@@ -405,7 +442,7 @@ export class Board {
       this.selection = big ? normRect(s.x0, s.y0, s.x1, s.y1) : null;
       emit('selection', this.selection);
     }
-    if (d.move) this.render();
+    if (d.move || d.resize) this.render();
     else this.renderLive();
     this.saveSoon();
   }
@@ -648,8 +685,8 @@ export class Board {
     for (const b of this.page.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
   }
 
-  async addBlock({ lines = [], x, y, kind = 'math', src, w, h }, { animateMs = 0, signal } = {}) {
-    const b = { id: uid(), kind, x, y, lines: [], color: settings.aiColor, fontPx: 22, author: 'ai', src, w, h };
+  async addBlock({ lines = [], x, y, kind = 'math', src, w, h }, { animateMs = 0, signal, author = 'ai' } = {}) {
+    const b = { id: uid(), kind, x, y, lines: [], color: settings.aiColor, fontPx: 22, author, src, w, h };
     this.page.blocks.push(b);
     if (kind === 'math' && animateMs > 0 && lines.length > 1) {
       for (const ln of lines) {
@@ -676,6 +713,21 @@ export class Board {
     const x = cb ? cb.x + cb.w + 60 : vis.x + 40;
     const y = cb ? cb.y : vis.y + 40;
     return this.addBlock({ kind: 'image', src, x, y, w: w * scale, h: h * scale });
+  }
+
+  // An image you paste, drop or pick: placed where you dropped it, or in the middle of the view,
+  // at most about half the visible width, then selected so it can be moved or resized straight away.
+  async placeImage(src, w, h, at) {
+    const vis = this.visibleWorld();
+    const scale = Math.min(1 / this.page.view.z, (vis.w * 0.5) / w, (vis.h * 0.6) / h);
+    const W = w * scale, H = h * scale;
+    const x = at ? at.x - W / 2 : vis.x + (vis.w - W) / 2;
+    const y = at ? at.y - H / 2 : vis.y + (vis.h - H) / 2;
+    const b = await this.addBlock({ kind: 'image', src, x, y, w: W, h: H }, { author: 'user' });
+    this.activeBlock = b;
+    this.markDirty({ x, y, w: W, h: H });
+    this.render();
+    return b;
   }
 
   setLocked(v) {
@@ -825,12 +877,22 @@ export class Board {
     ctx.clearRect(0, 0, this.o.width, this.o.height);
     ctx.setTransform(scale * view.z, 0, 0, scale * view.z, scale * view.ox, scale * view.oy);
     if (this.drawing?.stroke) drawStroke(ctx, this.drawing.stroke, this.drawing.predicted);
-    if (this.drawing?.move) {
-      const b = this.drawing.move;
+    const ab = this.tool === 'select' && this.activeBlock && this.page.blocks.includes(this.activeBlock) ? this.activeBlock : this.drawing?.move;
+    if (ab) {
+      const pad = 4 / view.z;
       ctx.save();
       ctx.strokeStyle = '#1a5fd0';
-      ctx.lineWidth = 1 / view.z;
-      ctx.strokeRect(b.x - 4, b.y - 4, (b.w || 100) + 8, (b.h || 30) + 8);
+      ctx.lineWidth = 1.5 / view.z;
+      ctx.strokeRect(ab.x - pad, ab.y - pad, (ab.w || 100) + 2 * pad, (ab.h || 30) + 2 * pad);
+      if (ab.kind === 'image') {
+        const hr = 7 / view.z;
+        ctx.beginPath();
+        ctx.arc(ab.x + ab.w, ab.y + ab.h, hr, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 2 / view.z;
+        ctx.stroke();
+      }
       ctx.restore();
     }
     if (settings.showMarks) for (const m of this.page.marks) drawMark(ctx, m, view.z);
@@ -887,6 +949,10 @@ export class Board {
       ctx.font = `${b.fontPx || 22}px ${FONT}`;
       ctx.textBaseline = 'top';
       (b.lines || []).forEach((ln, i) => ctx.fillText(String(ln), b.x, b.y + i * (b.fontPx || 22) * 1.6));
+      return;
+    }
+    if (b.kind === 'image') {
+      try { ctx.drawImage(lay.items[0].img, b.x, b.y, b.w, b.h); } catch {}
       return;
     }
     for (const it of lay.items) {

@@ -171,7 +171,14 @@ export class Panel {
     this.input.style.height = Math.min(160, this.input.scrollHeight) + 'px';
   }
 
-  add(role, md, { actions } = {}) {
+  // Empties the message list (used when switching sessions).
+  clear() {
+    this.list.innerHTML = '';
+  }
+
+  add(role, md, { actions, noLog } = {}) {
+    // The session keeps a log of the conversation so it can be restored when you come back.
+    if (!noLog && this.onLog && ['user', 'assistant', 'commentary'].includes(role)) this.onLog(role, md);
     const el = document.createElement('div');
     el.className = `msg ${role}`;
     if (role === 'commentary') {

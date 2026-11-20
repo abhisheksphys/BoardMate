@@ -1,6 +1,9 @@
-// Minimal IndexedDB key-value wrapper. Stores: pages, library, kv.
+// Minimal IndexedDB key-value wrapper.
+// Stores: sessions (titles, summaries… small), sessionData (pages, chat, Claude history), library (PDFs), kv,
+// and pages (only from version 1, read once to migrate into the first session).
 const DB_NAME = 'live-board';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const STORES = ['pages', 'library', 'kv', 'sessions', 'sessionData'];
 let dbPromise;
 
 function db() {
@@ -9,7 +12,7 @@ function db() {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const d = req.result;
-        for (const s of ['pages', 'library', 'kv']) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
+        for (const s of STORES) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s);
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);

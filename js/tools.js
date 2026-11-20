@@ -98,13 +98,23 @@ export const TOOL_SCHEMAS = [
   },
   {
     name: 'search_library',
-    description: "Search the user's own uploaded PDFs (books, notes, papers). Returns book id, PDF page index and a snippet.",
+    description: "Search the user's PDFs: the shared library plus this session's own materials (books, notes, papers). Returns book id, its scope, PDF page index and a snippet.",
     input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
   },
   {
     name: 'show_page',
     description: "Show a page of one of the user's PDFs in the panel and see it yourself. page = PDF page index (1-based), which can differ from the printed page number.",
     input_schema: { type: 'object', properties: { book: { type: 'string' }, page: { type: 'number' } }, required: ['book', 'page'] },
+  },
+  {
+    name: 'list_sessions',
+    description: "List the user's other work sessions: id, title, subject, last edited, short summary.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'read_session',
+    description: "Read another session to bring its results here: its summary, your LaTeX notes of its equations, recent chat, and an image of its page. Then use write_on_canvas or answer.",
+    input_schema: { type: 'object', properties: { session: { type: 'string', description: 'session id, or (part of) its title' } }, required: ['session'] },
   },
   {
     name: 'log_friction',
@@ -233,14 +243,15 @@ export async function runTool(use, ctx) {
         return ok(use.id, 'Saved.');
 
       case 'search_library': {
-        const books = await listBooks();
-        if (!books.length) return ok(use.id, 'The library is empty. The user can add PDFs in Settings → Library.');
-        const hits = await searchLibrary(inp.query || '');
-        return ok(use.id, JSON.stringify({ books: books.map((b) => b.id), hits }));
+        const sid = ctx.sessions?.currentId || null;
+        const books = await listBooks(sid);
+        if (!books.length) return ok(use.id, "No PDFs yet. The user can add shared ones in Settings → Library, or ones for this session with the 📎 button in the panel.");
+        const hits = await searchLibrary(inp.query || '', 6, sid);
+        return ok(use.id, JSON.stringify({ books: books.map((b) => ({ id: b.id, scope: b.inSession ? 'this session' : 'shared library' })), hits }));
       }
 
       case 'show_page': {
-        const r = await renderPage(inp.book, inp.page);
+        const r = await renderPage(inp.book, inp.page, 1.35, ctx.sessions?.currentId || null);
         panel.addImage(r.dataUrl, `${r.book} — PDF page ${r.page}`, [
           { label: 'Pin to board', run: () => board.pinImage(r.dataUrl, r.w, r.h) },
         ]);
@@ -249,6 +260,17 @@ export async function runTool(use, ctx) {
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: forClaude } },
           { type: 'text', text: `Shown to the user: ${r.book}, PDF page ${r.page}.` },
         ]);
+      }
+
+      case 'list_sessions':
+        return ok(use.id, JSON.stringify(await ctx.sessions.listForClaude()));
+
+      case 'read_session': {
+        const r = await ctx.sessions.readForClaude(inp.session || '');
+        if (!r) return fail(use.id, 'No session matches that. Call list_sessions to see them.');
+        const out = [{ type: 'text', text: JSON.stringify(r.info) }];
+        if (r.snap) out.unshift({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: r.snap } });
+        return ok(use.id, out);
       }
 
       case 'log_friction':

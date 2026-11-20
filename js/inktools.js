@@ -15,7 +15,7 @@ const ERASER_PRESETS = [8, 16, 28, 44, 64];
 const $ = (s) => document.querySelector(s);
 
 // A popover that opens under its anchor and closes on an outside tap (without drawing) or Escape.
-function makePopover(pop, triggerSel) {
+export function makePopover(pop, triggerSel) {
   const open = (anchor) => {
     closeAll(pop);
     pop.hidden = false;

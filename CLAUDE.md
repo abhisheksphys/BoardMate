@@ -5,13 +5,15 @@ A personal handwriting whiteboard. Claude watches the page (images), listens (sp
 ## Constraints
 - Static site: plain HTML, CSS, ES modules. No build step, no npm. Hosted on GitHub Pages.
 - External libraries only from cdn.jsdelivr.net or cdnjs.cloudflare.com (currently MathJax 3, marked, Pyodide, pdf.js).
-- Single user, online only. Data lives in the browser (localStorage for settings, IndexedDB for pages and PDFs).
+- Single user, online only. Data lives in the browser (localStorage for settings; IndexedDB stores `sessions`, `sessionData`, `library`, `kv`). PDFs are shared (`global`) and/or belong to sessions (`sessions: [ids]`).
 - Must work well in iPad Safari with Apple Pencil (Pointer Events, pressure; fingers pan/zoom).
 
 ## Files
 - `index.html`, `styles.css` — layout and look.
 - `js/app.js` — wiring: toolbar, mic, events, startup.
 - `js/board.js` — canvas: strokes, eraser, select/move, pan/zoom, pages, undo, AI blocks, marks, `snapshot()` for Claude.
+- `js/sessions.js` — sessions: per-session pages/chat/Claude history/cost, autosave, auto titles + summaries + recaps, drawer (search, subjects, pin, branch, trash), backup/restore, session PDFs (📎).
+- `js/images.js` — paste / pick / drop images onto the page (scaled down before saving).
 - `js/inktools.js` — toolbar pen options: thickness slider/presets, colour palette, system colour picker, recent colours.
 - `js/mathrender.js` — LaTeX → image (MathJax SVG) for AI blocks.
 - `js/agent.js` — main assistant loop and system prompt; sends page image + context with every question.

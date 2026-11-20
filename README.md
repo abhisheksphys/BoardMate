@@ -22,6 +22,16 @@ A handwriting whiteboard for iPad where Claude watches the page, listens, answer
 - **Change things by asking**: "move the panel to the left", "from now on use SI units", "save a button that checks my signs" — applied instantly.
 - **Change the app itself**: "add a button that exports this page as a PNG". The coding agent opens a pull request; you get a card with *Ship it*. After shipping, reload. *Roll back* undoes the last shipped change. Claude also keeps a log of things that went wrong and offers to fix them (it never ships without your tap).
 
+## Sessions
+
+- **Sessions** (top-left button, or tap the session title) lists your work, newest first, with a thumbnail, cost and summary. **+ New** starts a fresh page and a fresh Claude; everything saves automatically.
+- When you leave a session, Claude names it and writes a short summary and a **"where you left off"** note that greets you when you return. Rename anytime.
+- Organise with **subjects** and **pins**; **search** titles, notes and equations, or tap **Ask Claude to find it** for descriptions like "where I took the curl of B".
+- **Branch** a session to try a different approach without touching the original. Deleted sessions stay in **Trash** for 30 days.
+- Ask Claude to bring results from another session: "put yesterday's boundary conditions here".
+- **📎 in the Claude panel**: PDFs just for this session. PDFs added in Settings are shared by every session.
+- **Back up** saves everything (optionally with PDFs) to a file; **Restore…** brings it back on any device or browser. Your API key is never included. The Safari tab and a home-screen copy of the app keep separate data, so use backup and restore to move between them.
+
 ## Voice tips
 
 - Safari asks for microphone permission the first time.

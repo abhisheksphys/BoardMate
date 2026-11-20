@@ -12,6 +12,8 @@ import { SettingsUI } from './settingsUI.js';
 import { warmCas } from './cas.js';
 import { meter, fmt, overBudget } from './costs.js';
 import { initInkTools } from './inktools.js';
+import { initImages } from './images.js';
+import { Sessions } from './sessions.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -23,7 +25,7 @@ const panel = new Panel({
   onSend: (text) => askFrom(text, 'typed'),
   onAction: (kind, a) => {
     if (kind === 'saved') askFrom(a.prompt, 'action button', a.name);
-    if (kind === 'clear-chat') agent.reset();
+    if (kind === 'clear-chat') { agent.reset(); sessions.chat = []; sessions.markChanged(); }
   },
 });
 const changes = new Changes({ panel, voice });
@@ -36,24 +38,23 @@ function askFrom(text, origin, label) {
   agent.ask(text, { selection: board.selection, origin });
 }
 
-// ---------- load saved pages ----------
-try {
-  board.load((await idb.get('pages', 'all')) || []);
-} catch {
-  board.load([]);
-}
-on('save', () => {
-  idb.set('pages', 'all', board.pages).catch((e) => panel.status('Could not save: ' + e.message));
-});
+// ---------- sessions (each has its own pages, chat, notes and PDFs; saved automatically) ----------
+const sessions = new Sessions({ board, panel, agent });
+agent.sessions = sessions;
+window.liveSessions = sessions;
+await sessions.init();
 
 // ---------- toolbar ----------
 function selectTool(name) {
   board.tool = name;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === name));
   if (name !== 'select' && board.selection) { board.selection = null; board.render(); }
-  if (name !== 'eraser') { board.eraserCursor = null; board.render(); }
+  if (name !== 'eraser') board.eraserCursor = null;
+  if (name !== 'select') board.activeBlock = null;
+  board.renderLive();
 }
 const ink = initInkTools({ selectPen: () => selectTool('pen'), selectEraser: () => selectTool('eraser') });
+initImages({ board, panel, selectTool });
 document.querySelectorAll('[data-tool]').forEach((btn) =>
   btn.addEventListener('click', () => {
     // Tapping the eraser while it's already selected opens its size options (like GoodNotes).
@@ -74,8 +75,13 @@ $('#pageLabel').addEventListener('click', () => {
   const name = prompt('Page name', board.page.name);
   if (name) { board.page.name = name; emit('page', { page: board.page, index: board.pi, count: board.pages.length }); board.saveSoon(); }
 });
-on('page', ({ page, index, count }) => { $('#pageLabel').textContent = `${page.name} (${index + 1}/${count})`; });
-$('#pageLabel').textContent = `${board.page.name} (${board.pi + 1}/${board.pages.length})`;
+function setPageLabel({ page, index, count }) {
+  $('#pageLabel').textContent = count > 1 ? `${page.name} · ${index + 1}/${count}` : page.name;
+  $('#pageLabel').title = `${page.name} (page ${index + 1} of ${count}) — tap to rename`;
+}
+on('page', setPageLabel);
+setPageLabel({ page: board.page, index: board.pi, count: board.pages.length });
+
 
 $('#attention').addEventListener('change', (e) => setSettings({ attention: e.target.value }));
 $('#voiceOutBtn').addEventListener('click', () => {
@@ -97,6 +103,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.closest('input,textarea,select')) return;
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? board.redo() : board.undo(); }
+  else if ((e.key === 'Backspace' || e.key === 'Delete') && board.deleteActiveBlock()) e.preventDefault();
   else if (e.key === 'Escape') agent.stop();
   else if (e.key === 'p') $('[data-tool="pen"]').click();
   else if (e.key === 'e') $('[data-tool="eraser"]').click();
@@ -180,7 +187,6 @@ on('settings', applySettings);
 applySettings();
 
 // ---------- start ----------
-panel.add('info', `Write on the page, then ask about it — type below, hold the mic, or tap a button. Select a region with ⬚ to point at something. Attention: **${{ live: 'Live', quiet: 'Quiet live', demand: 'On demand' }[settings.attention]}**.`);
 if (!settings.apiKey) settingsUI.open(true);
 else {
   setTimeout(warmCas, 6000);
