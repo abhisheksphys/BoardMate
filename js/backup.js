@@ -1,5 +1,5 @@
 // Automatic backup of all sessions, PDFs and settings to a PRIVATE GitHub repository, and restore from it.
-// Layout in the repo:  sessions/<id>.json  ·  pdfs/<id>.pdf + pdfs/<id>.json  ·  settings.json  ·  README.md
+// Layout in the repo:  sessions/<id>.json  ·  pdfs/<id>.pdf + pdfs/<id>.json  ·  folders.json  ·  settings.json  ·  README.md
 // Only what changed since the last backup is uploaded (one commit per backup). The API key and the GitHub
 // token are never included. The app's own repo is public on GitHub Pages, so backups never go there.
 import { settings } from './settings.js';
@@ -106,6 +106,8 @@ export class Backup {
       const mj = JSON.stringify(meta);
       items.push({ path: `pdfs/${b.id}.json`, stamp: hash(mj), make: async () => textToB64(mj) });
     }
+    const fj = JSON.stringify((await idb.get('kv', 'folders')) || []);
+    items.push({ path: 'folders.json', stamp: hash(fj), make: async () => textToB64(fj) });
     const sj = JSON.stringify(cleanSettings());
     items.push({ path: 'settings.json', stamp: hash(sj), make: async () => textToB64(sj) });
     return items;
@@ -185,6 +187,7 @@ export class Backup {
         if ((m = e.path.match(/^sessions\/(.+)\.json$/))) j.sessions.push(JSON.parse(b64ToText(await blob(e.sha))));
         else if ((m = e.path.match(/^pdfs\/(.+)\.json$/))) pdfMeta[m[1]] = JSON.parse(b64ToText(await blob(e.sha)));
         else if ((m = e.path.match(/^pdfs\/(.+)\.pdf$/))) pdfData[m[1]] = (await blob(e.sha)).replace(/\n/g, '');
+        else if (e.path === 'folders.json') j.folders = JSON.parse(b64ToText(await blob(e.sha)));
         else if (e.path === 'settings.json') j.settings = JSON.parse(b64ToText(await blob(e.sha)));
       }
       for (const id of Object.keys(pdfMeta)) if (pdfData[id]) j.books.push({ ...pdfMeta[id], data: pdfData[id] });

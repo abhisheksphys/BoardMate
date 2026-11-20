@@ -249,7 +249,8 @@ export class Board {
     this.goto(0);
   }
 
-  goto(i) {
+  // view: arrive zoomed in (flipping while zoomed keeps the zoom); otherwise a notebook page is shown whole
+  goto(i, { view } = {}) {
     if (i < 0 || i >= this.pages.length) return;
     this.pi = i;
     this.undoStack = [];
@@ -257,7 +258,11 @@ export class Board {
     this.selection = null;
     this.activeBlock = null;
     this.slide = 0;
-    if (this.layout) { this.fit(); this.prepareNeighbours(); }
+    if (this.layout) {
+      if (view) { Object.assign(this.page.view, view); this.clampView(); }
+      else this.fit();
+      this.prepareNeighbours();
+    }
     this.prepareBlocks();
     this.render();
     emit('page', { page: this.page, index: i, count: this.pages.length });
@@ -511,8 +516,23 @@ export class Board {
   }
 
   // Slide to the next (+1) or previous (-1) page, or back (0), and settle there: a page is never left half in view.
+  // Zoomed in, the zoom is kept: going forward you land at the top of the next page, going back at the bottom
+  // of the previous one (like scrolling through a document).
   flipTo(dir) {
-    const target = dir === 0 || !this.pages[this.pi + dir] ? 0 : -dir * this.pageStep(dir);
+    const v = this.page.view, vert = this.vertical();
+    const zoomed = !this.atFit();
+    let target = dir === 0 || !this.pages[this.pi + dir] ? 0 : -dir * this.pageStep(dir);
+    let arrive = null;
+    if (zoomed && target !== 0) {
+      const next = this.pages[this.pi + dir], ns = this.pageSize(next), cs = this.pageSize();
+      const o = vert ? v.oy : v.ox, screen = vert ? this.h : this.w, span = (vert ? ns.h : ns.w) * v.z;
+      // where the new page's leading edge should end up on screen
+      const dest = span <= screen - 2 * PAGE_MARGIN ? (screen - span) / 2 : dir > 0 ? PAGE_MARGIN : screen - PAGE_MARGIN - span;
+      const now = dir > 0 ? o + this.pageStep(1) : o - this.pageStep(-1); // its edge now (slide 0)
+      target = dest - now;
+      const cross = vert ? v.ox + ((cs.w - ns.w) * v.z) / 2 : v.oy + ((cs.h - ns.h) * v.z) / 2;
+      arrive = vert ? { z: v.z, ox: cross, oy: dest } : { z: v.z, ox: dest, oy: cross };
+    }
     const from = this.slide, t0 = performance.now(), ms = 220;
     cancelAnimationFrame(this.flipRaf);
     const stepFn = (t) => {
@@ -521,7 +541,7 @@ export class Board {
       this.render();
       if (k < 1) { this.flipRaf = requestAnimationFrame(stepFn); return; }
       this.flipRaf = null;
-      if (target !== 0) { this.slide = 0; this.goto(this.pi + dir); this.saveSoon(); }
+      if (target !== 0) { this.slide = 0; this.goto(this.pi + dir, arrive ? { view: arrive } : {}); this.saveSoon(); }
       else { this.slide = 0; this.render(); }
     };
     this.flipRaf = requestAnimationFrame(stepFn);
@@ -595,6 +615,13 @@ export class Board {
     c.addEventListener('pointerup', (e) => this.onUp(e, false));
     c.addEventListener('pointercancel', (e) => this.onUp(e, true));
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    // A lift that happens over something else (a floating button, the panel) still ends the drag or stroke.
+    for (const t of ['pointerup', 'pointercancel']) {
+      window.addEventListener(t, (e) => {
+        if (e.target === c) return;
+        if (this.drawing?.pointerId === e.pointerId || this.touches.has(e.pointerId)) this.onUp(e, t === 'pointercancel');
+      }, true);
+    }
     c.addEventListener('pointerleave', () => { if (!this.drawing && this.eraserCursor) { this.eraserCursor = null; this.renderLive(); } });
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -606,7 +633,20 @@ export class Board {
         clearTimeout(this.wheelTimer);
         this.wheelTimer = setTimeout(() => { this.wheelAcc = 0; }, 250);
         if (Math.abs(this.wheelAcc) > 90 && !this.flipRaf) { const d = Math.sign(this.wheelAcc); this.wheelAcc = 0; this.flipTo(d); }
-      } else { this.page.view.ox -= e.deltaX; this.page.view.oy -= e.deltaY; this.clampView(); this.render(); }
+      } else {
+        const v = this.page.view, before = this.vertical() ? v.oy - e.deltaY : v.ox - (e.deltaX || 0);
+        v.ox -= e.deltaX; v.oy -= e.deltaY; this.clampView(); this.render();
+        if (this.layout) {
+          // zoomed in: scrolling on past the page's end turns to the next (previous) page, keeping the zoom
+          const over = before - (this.vertical() ? v.oy : v.ox);
+          if (Math.abs(over) > 0.5) {
+            this.wheelAcc = (this.wheelAcc || 0) - over;
+            clearTimeout(this.wheelTimer);
+            this.wheelTimer = setTimeout(() => { this.wheelAcc = 0; }, 250);
+            if (Math.abs(this.wheelAcc) > 120 && !this.flipRaf) { const d = Math.sign(this.wheelAcc); this.wheelAcc = 0; this.flipTo(d); }
+          }
+        }
+      }
       this.saveSoon();
     }, { passive: false });
   }
@@ -640,6 +680,8 @@ export class Board {
       // The previous stroke's pen-up never arrived (it happens with very fast writing):
       // keep that stroke and start the new one, instead of ignoring the new one.
       if (this.drawing.stroke) this.finishStroke(this.drawing);
+      // a drag (move, resize, select, lasso) whose lift was lost: finish it, so the board never stays frozen
+      else if (this.drawing.pointerId !== e.pointerId) this.onUp({ pointerId: this.drawing.pointerId, pointerType: this.drawing.pointerType, clientX: e.clientX, clientY: e.clientY }, false);
       else return;
     }
     try { this.c.setPointerCapture(e.pointerId); } catch {}
@@ -661,11 +703,11 @@ export class Board {
       this.eraseAt(w);
     } else if (this.tool === 'select') {
       const a = this.activeBlock;
-      if (a && a.kind === 'image' && this.page.blocks.includes(a) && this.hitHandle(a, w, e.pointerType === 'touch')) {
-        // drag the corner handle to resize (keeps the image's proportions)
-        this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h }, start: w };
+      if (a && this.page.blocks.includes(a) && this.hitHandle(a, w, e.pointerType === 'touch')) {
+        // drag the corner handle to resize (keeps proportions); Claude's blocks get a new letter size on release
+        this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h, fontPx: a.fontPx, strokePx: a.strokePx }, start: w };
       } else {
-        const b = this.hitBlock(w);
+        const b = this.hitBlock(w, e.pointerType === 'touch');
         this.activeBlock = b;
         if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w };
         else this.drawing = { ...base, sel: { x0: w.x, y0: w.y } };
@@ -677,7 +719,7 @@ export class Board {
   }
 
   hitHandle(b, w, finger = false) {
-    const r = (finger ? 30 : 18) / this.page.view.z; // a fingertip needs a bigger target than the Pencil
+    const r = (finger ? 34 : 24) / this.page.view.z; // a fingertip needs a bigger target than the Pencil
     return Math.hypot(w.x - (b.x + b.w), w.y - (b.y + b.h)) < r;
   }
 
@@ -685,7 +727,7 @@ export class Board {
     const p = this.evtPos(e);
     const w = this.toWorld(p.sx, p.sy);
     const a = this.activeBlock;
-    return (a && a.kind === 'image' && this.page.blocks.includes(a) && this.hitHandle(a, w, true)) || !!this.hitBlock(w);
+    return (a && this.page.blocks.includes(a) && this.hitHandle(a, w, true)) || !!this.hitBlock(w, true);
   }
 
   deleteActiveBlock() {
@@ -725,9 +767,14 @@ export class Board {
       else if (d.erase) { this.eraserCursor = w; this.eraseAt(w); }
       else if (d.move) { d.move.x = d.from.x + w.x - d.start.x; d.move.y = d.from.y + w.y - d.start.y; }
       else if (d.resize) {
-        const nw = Math.max(30 / this.page.view.z, d.from.w + (w.x - d.start.x));
-        d.resize.w = nw;
-        d.resize.h = (nw * d.from.h) / d.from.w;
+        const fw = d.from.w || 100, fh = d.from.h || 30;
+        // the handle follows the Pencil diagonally: use whichever direction was dragged more
+        const k = Math.max((fw + (w.x - d.start.x)) / fw, (fh + (w.y - d.start.y)) / fh);
+        const min = Math.max(30 / this.page.view.z / fw, d.resize.kind === 'image' ? 0 : 8 / (d.from.fontPx || 22));
+        const max = d.resize.kind === 'image' ? 20 : 160 / (d.from.fontPx || 22);
+        d.k = Math.min(max, Math.max(min, k));
+        d.resize.w = fw * d.k;
+        d.resize.h = fh * d.k;
       }
       else if (d.sel) { d.sel.x1 = w.x; d.sel.y1 = w.y; }
       else if (d.lasso) {
@@ -750,9 +797,9 @@ export class Board {
       const g = this.gesture;
       this.touches.delete(e.pointerId);
       this.gesture = null;
-      if (this.touches.size) { if (g?.paging) this.slide = 0; this.startGesture(); }
+      if (this.touches.size) { if (this.slide) { this.slide = 0; this.pullAdd = false; this.render(); } this.startGesture(); }
       else {
-        if (g?.paging && this.pullAdd) {
+        if ((g?.paging || g?.kind === 'pan') && this.pullAdd) {
           // pulled far enough past the last page: a new page springs in
           this.pullAdd = false;
           this.newPage();
@@ -761,6 +808,11 @@ export class Board {
           // flip if dragged far enough (or flicked), otherwise settle back on this page
           const fast = Math.abs(this.slide) > 40 && performance.now() - g.t0 < 300;
           const far = Math.abs(this.slide) > this.pageStep() * 0.18;
+          this.flipTo(far || fast ? -Math.sign(this.slide) : 0);
+        } else if (g?.kind === 'pan' && this.slide) {
+          // zoomed in and dragged past the page's end: on to the next (previous) page if pulled far enough
+          const fast = Math.abs(this.slide) > 40 && performance.now() - (g.overT0 || 0) < 300;
+          const far = Math.abs(this.slide) > Math.min(this.pageStep() * 0.18, 150);
           this.flipTo(far || fast ? -Math.sign(this.slide) : 0);
         }
         this.saveSoon();
@@ -796,10 +848,17 @@ export class Board {
       }
     } else if (d.resize) {
       const b = d.resize;
-      if (b.w !== d.from.w) {
-        this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h } } });
+      if (d.k && Math.abs(d.k - 1) > 0.01) {
+        if (b.kind !== 'image') {
+          // Claude's text and maths: typeset again at the new size (stays sharp), not stretched
+          b.fontPx = (d.from.fontPx || 22) * d.k;
+          if (d.from.strokePx) b.strokePx = d.from.strokePx * d.k;
+          this.layouts.delete(b.id);
+          this.layoutBlock(b).then(() => { this.render(); this.saveSoon(); });
+        }
+        this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx, strokePx: b.strokePx } } });
         this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h });
-      }
+      } else Object.assign(b, { w: d.from.w, h: d.from.h });
     } else if (d.sel) {
       const s = d.sel;
       const big = s.x1 !== undefined && Math.hypot(s.x1 - s.x0, s.y1 - s.y0) > 8 / this.page.view.z;
@@ -871,7 +930,18 @@ export class Board {
     } else if (g.kind === 'pan' && pts.length === 1) {
       v.ox = g.o0.x + pts[0].sx - g.p0.sx;
       v.oy = g.o0.y + pts[0].sy - g.p0.sy;
+      const want = this.vertical() ? v.oy : v.ox;
       this.clampView();
+      if (this.layout) {
+        // notebook, zoomed in: dragging on past the page's end brings the next (or previous) page in
+        let d = want - (this.vertical() ? v.oy : v.ox);
+        const step = Math.min(this.pageStep(), this.vertical() ? this.h : this.w);
+        this.pullAdd = false;
+        if (d < 0 && this.pi === this.pages.length - 1) { d = spring(d, step * 0.5); this.pullAdd = Math.abs(d) > step * 0.2; }
+        else if (d > 0 && this.pi === 0) d = spring(d, step * 0.2);
+        if (d && !this.slide) g.overT0 = performance.now();
+        this.slide = d;
+      }
     } else if (g.kind === 'pan' && pts.length >= 2) {
       this.startGesture();
     } else if (g.kind === 'pinch' && pts.length >= 2) {
@@ -978,7 +1048,8 @@ export class Board {
   }
 
   // How Claude's next block looks. Each of size, stroke width and colour is either "mimic" (taken from your
-  // writing where it goes) or "manual" (a set value). Size is always in units of your own writing.
+  // writing where it goes) or "manual" (a set value). Size is in units of your own writing, except
+  // "fixed": one absolute size (points; 1 pt = 96/72 board units, so 12 pt prints as 12 pt) everywhere.
   aiStyle(at, selection = null, extraScale = 1) {
     const s = settings;
     const got = this.writingPool(at, selection);
@@ -988,7 +1059,12 @@ export class Board {
     const factor = s.aiSizeMode === 'manual' ? Number(s.aiSizeManual) || 1 : Number(s.aiSizeScale) || 1;
     const base = s.aiSizeMode === 'manual' ? avg : local;
     const scale = Math.max(0.2, Math.min(4, factor * (Number(extraScale) || 1)));
-    const fontPx = Math.round(Math.max(10, Math.min(160, base * scale)) * 10) / 10;
+    let fontPx = Math.round(Math.max(10, Math.min(160, base * scale)) * 10) / 10;
+    if (s.aiSizeMode === 'fixed') {
+      const pt = Math.max(6, Math.min(120, Number(s.aiSizeFixed) || 18));
+      // a size Claude was asked for this once ("write it bigger") still applies on top
+      fontPx = Math.round(Math.max(8, Math.min(160, pt * (96 / 72) * Math.max(0.2, Math.min(4, Number(extraScale) || 1)))) * 10) / 10;
+    }
     // stroke: the line thickness wanted for the letters (same units as your pen width)
     const strokePx = s.aiWeightMode === 'mimic' ? inkWidth(pool.length ? pool : this.page.strokes) : Math.max(0, Number(s.aiWeightManual) || 0);
     const color = s.aiColorMode === 'mimic' ? inkColor(pool.length ? pool : this.page.strokes) || s.penColor : s.aiColor;
@@ -1039,10 +1115,10 @@ export class Board {
   }
 
   // ---------- hit testing / erasing ----------
-  hitBlock(w) {
+  hitBlock(w, finger = false) {
+    const pad = (finger ? 18 : 12) / this.page.view.z; // a margin around each block, the same on screen at any zoom
     for (let i = this.page.blocks.length - 1; i >= 0; i--) {
       const b = this.page.blocks[i];
-      const pad = 6;
       if (w.x >= b.x - pad && w.x <= b.x + (b.w || 100) + pad && w.y >= b.y - pad && w.y <= b.y + (b.h || 30) + pad) return b;
     }
     return null;
@@ -1441,7 +1517,7 @@ export class Board {
       const w = ns.w * v.z, h = ns.h * v.z, d = this.dpr;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalAlpha = Math.min(1, Math.abs(this.slide) / (step * 0.2));
+      ctx.globalAlpha = Math.min(1, Math.abs(this.slide) / (Math.min(step, this.vertical() ? this.h : this.w) * 0.2));
       ctx.setLineDash([8 * d, 6 * d]);
       ctx.lineWidth = 2 * d;
       ctx.strokeStyle = this.pullAdd ? '#1a5fd0' : '#9aa0aa';
@@ -1483,7 +1559,7 @@ export class Board {
       ctx.strokeStyle = '#1a5fd0';
       ctx.lineWidth = 1.5 / view.z;
       ctx.strokeRect(ab.x - pad, ab.y - pad, (ab.w || 100) + 2 * pad, (ab.h || 30) + 2 * pad);
-      if (ab.kind === 'image') {
+      if (this.tool === 'select') { // the resize handle (images and Claude's blocks)
         const hr = 7 / view.z;
         ctx.beginPath();
         ctx.arc(ab.x + ab.w, ab.y + ab.h, hr, 0, Math.PI * 2);
@@ -1596,6 +1672,20 @@ export class Board {
       try { ctx.drawImage(lay.items[0].img, b.x, b.y, b.w, b.h); } catch {}
       return;
     }
+    // while its corner handle is being dragged, the block is shown stretched; on release it is typeset at the new size
+    const k = lay.w > 0 && b.w > 0 ? b.w / lay.w : 1;
+    if (Math.abs(k - 1) > 0.01) {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.scale(k, k);
+      ctx.translate(-b.x, -b.y);
+      try { this.drawItems(ctx, b, lay); } finally { ctx.restore(); }
+      return;
+    }
+    this.drawItems(ctx, b, lay);
+  }
+
+  drawItems(ctx, b, lay) {
     for (const it of lay.items) {
       if (it.img) {
         try { ctx.drawImage(it.img, b.x + it.x, b.y + it.y, it.w, it.h); } catch {}

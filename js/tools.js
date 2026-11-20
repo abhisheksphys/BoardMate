@@ -34,7 +34,7 @@ export const TOOL_SCHEMAS = [
         anchor: { type: 'string', enum: ['below_content', 'below_selection', 'right_of_selection', 'at_xy'] },
         x: { type: 'number' },
         y: { type: 'number' },
-        size_scale: { type: 'number', description: "Optional. The text is automatically sized to match the user's handwriting there; use e.g. 1.3 for larger or 0.8 for smaller only if the user asks." },
+        size_scale: { type: 'number', description: "Optional. The text is automatically sized by the user's settings (matching their handwriting there, or a fixed size they chose); use e.g. 1.3 for larger or 0.8 for smaller only if the user asks." },
       },
       required: ['lines'],
     },

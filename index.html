@@ -11,7 +11,7 @@
   <title>Live Board</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2026.11.21-0033">
+  <link rel="stylesheet" href="styles.css?v=2026.11.21-0147">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -48,6 +48,11 @@
     }, 9000);
   </script>
   <!-- Cache busting: every module is fetched with this update's version, so new files never mix with cached old ones. -->
+  <dialog id="moveDlg" class="sheet move-sheet">
+    <header><h3 id="moveTitle">Move to…</h3><button type="button" class="sheet-x" id="moveCancel" aria-label="Close">×</button></header>
+    <div id="moveList" class="mv-list"></div>
+    <footer><button type="button" class="ghost" id="moveNew">＋ New folder…</button></footer>
+  </dialog>
   <dialog id="newSessionDlg" class="sheet">
     <header><h3>New session</h3><button type="button" class="sheet-x" id="nsCancel" aria-label="Close">×</button></header>
     <div class="type-cards">
@@ -134,36 +139,36 @@
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.21-0033",
-  "./js/app.js": "./js/app.js?v=2026.11.21-0033",
-  "./js/backup.js": "./js/backup.js?v=2026.11.21-0033",
-  "./js/board.js": "./js/board.js?v=2026.11.21-0033",
-  "./js/bus.js": "./js/bus.js?v=2026.11.21-0033",
-  "./js/cas.js": "./js/cas.js?v=2026.11.21-0033",
-  "./js/changes.js": "./js/changes.js?v=2026.11.21-0033",
-  "./js/claude.js": "./js/claude.js?v=2026.11.21-0033",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0033",
-  "./js/costs.js": "./js/costs.js?v=2026.11.21-0033",
-  "./js/export.js": "./js/export.js?v=2026.11.21-0033",
-  "./js/github.js": "./js/github.js?v=2026.11.21-0033",
-  "./js/images.js": "./js/images.js?v=2026.11.21-0033",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0033",
-  "./js/library.js": "./js/library.js?v=2026.11.21-0033",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0033",
-  "./js/pages.js": "./js/pages.js?v=2026.11.21-0033",
-  "./js/panel.js": "./js/panel.js?v=2026.11.21-0033",
-  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0033",
-  "./js/perception.js": "./js/perception.js?v=2026.11.21-0033",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0033",
-  "./js/settings.js": "./js/settings.js?v=2026.11.21-0033",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0033",
-  "./js/storage.js": "./js/storage.js?v=2026.11.21-0033",
-  "./js/tools.js": "./js/tools.js?v=2026.11.21-0033",
-  "./js/version.js": "./js/version.js?v=2026.11.21-0033",
-  "./js/voice.js": "./js/voice.js?v=2026.11.21-0033"
+  "./js/agent.js": "./js/agent.js?v=2026.11.21-0147",
+  "./js/app.js": "./js/app.js?v=2026.11.21-0147",
+  "./js/backup.js": "./js/backup.js?v=2026.11.21-0147",
+  "./js/board.js": "./js/board.js?v=2026.11.21-0147",
+  "./js/bus.js": "./js/bus.js?v=2026.11.21-0147",
+  "./js/cas.js": "./js/cas.js?v=2026.11.21-0147",
+  "./js/changes.js": "./js/changes.js?v=2026.11.21-0147",
+  "./js/claude.js": "./js/claude.js?v=2026.11.21-0147",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0147",
+  "./js/costs.js": "./js/costs.js?v=2026.11.21-0147",
+  "./js/export.js": "./js/export.js?v=2026.11.21-0147",
+  "./js/github.js": "./js/github.js?v=2026.11.21-0147",
+  "./js/images.js": "./js/images.js?v=2026.11.21-0147",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0147",
+  "./js/library.js": "./js/library.js?v=2026.11.21-0147",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0147",
+  "./js/pages.js": "./js/pages.js?v=2026.11.21-0147",
+  "./js/panel.js": "./js/panel.js?v=2026.11.21-0147",
+  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0147",
+  "./js/perception.js": "./js/perception.js?v=2026.11.21-0147",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0147",
+  "./js/settings.js": "./js/settings.js?v=2026.11.21-0147",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0147",
+  "./js/storage.js": "./js/storage.js?v=2026.11.21-0147",
+  "./js/tools.js": "./js/tools.js?v=2026.11.21-0147",
+  "./js/version.js": "./js/version.js?v=2026.11.21-0147",
+  "./js/voice.js": "./js/voice.js?v=2026.11.21-0147"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.21-0033"></script>
+  <script type="module" src="js/app.js?v=2026.11.21-0147"></script>
 </head>
 <body class="panel-right">
   <div id="errBar" role="alert" hidden><span></span><button type="button" onclick="location.reload()">Reload</button><button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true">✕</button></div>
@@ -248,12 +253,14 @@
     <aside id="drawer" hidden>
       <div class="drawer-head">
         <b>Sessions</b>
+        <button id="newFolder" class="ghost new-folder" type="button" title="New folder here" aria-label="New folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10.5v5M9.5 13h5"/></svg>Folder</button>
         <button id="newSession" class="primary" type="button">+ New</button>
         <button id="drawerClose" class="ghost" type="button" aria-label="Close">✕</button>
       </div>
       <input id="sessionSearch" type="search" placeholder="Search titles, notes, equations…" autocomplete="off">
       <button id="askFind" class="ask-find" type="button" hidden>Ask Claude to find it</button>
       <div id="sessionChips" class="s-chips"></div>
+      <nav id="sessionCrumbs" class="s-crumbs" aria-label="Folder"></nav>
       <div id="sessionList"></div>
       <div class="drawer-foot">
         <button id="branchCurrent" type="button" title="Copy this session to try a different approach">Branch this session</button>

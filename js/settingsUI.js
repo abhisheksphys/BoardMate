@@ -40,9 +40,10 @@ const SECTIONS = [
   ]],
   ['Board', [
     { k: 'allowBoardWrite', label: 'Claude may write on the board', type: 'checkbox' },
-    { k: 'aiSizeMode', label: "Claude's writing size", type: 'select', options: [['mimic', 'Mimic: like my handwriting where it writes'], ['manual', 'Manual: a set size']] },
+    { k: 'aiSizeMode', label: "Claude's writing size", type: 'select', options: [['mimic', 'Mimic: like my handwriting where it writes'], ['manual', 'Manual: a set size'], ['fixed', 'Fixed: one absolute size everywhere']] },
     { k: 'aiSizeScale', label: 'Size, in units of my handwriting there (1 = same, 0.9 = a bit smaller, 1.2 = larger)', type: 'number', step: 0.05, when: ['aiSizeMode', 'mimic'] },
     { k: 'aiSizeManual', label: 'Size, in units of my average writing on the page (1 = same, 1.5 = half as big again)', type: 'number', step: 0.05, when: ['aiSizeMode', 'manual'], avgHint: true },
+    { k: 'aiSizeFixed', label: 'Size in points, as in a document (12 = printed text, 18 = large; the same on every page)', type: 'number', step: 1, when: ['aiSizeMode', 'fixed'], ptHint: true },
     { k: 'aiWeightMode', label: "Claude's stroke width", type: 'select', options: [['manual', 'Manual: a set thickness'], ['mimic', 'Mimic: as thick as my pen strokes']] },
     { k: 'aiWeightManual', label: 'Stroke width (same units as Pen width; 0 = normal type)', type: 'number', step: 0.2, when: ['aiWeightMode', 'manual'] },
     { k: 'aiColorMode', label: "Claude's colour", type: 'select', options: [['manual', 'Manual: a colour I pick'], ['mimic', 'Mimic: the ink colour I write in there']] },
@@ -93,7 +94,7 @@ function fieldHtml(f) {
 function fieldInner(f) {
   const id = 'set-' + f.k.replace(/\./g, '-');
   const v = getPath(settings, f.k);
-  const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : f.avgHint ? '<small class="avg-hint"></small>' : '';
+  const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : f.avgHint ? '<small class="avg-hint"></small>' : f.ptHint ? '<small class="pt-hint"></small>' : '';
   if (f.type === 'checkbox') return `<label class="row check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> <span>${escapeHtml(f.label)}</span></label>`;
   if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
   if (f.type === 'model') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}" data-model>${modelOptions(cachedModels(), v)}</select>${hint}</label>`;
@@ -173,6 +174,7 @@ export class SettingsUI {
         </div>
         <footer><button value="cancel" class="ghost">Cancel</button><button id="saveSettings" value="save">Save</button></footer>
       </form>`;
+    this.makeCollapsible();
     this.fillVoices();
     this.fillModels();
     this.renderCosts();
@@ -180,6 +182,7 @@ export class SettingsUI {
     // show what "1" means right now: your average writing size on this page
     const avg = window.liveBoard?.averageWritingSize?.();
     this.dlg.querySelectorAll('.avg-hint').forEach((el) => { el.textContent = avg ? `Your average writing on this page is about ${Math.round(avg * 0.6)} px tall, so 1 = Claude's letters about that size.` : 'No handwriting on this page yet: 1 = a normal default size until you write.'; });
+    this.dlg.querySelectorAll('.pt-hint').forEach((el) => { el.textContent = avg ? `For comparison, your handwriting on this page is about ${Math.round(avg * 0.75)} pt.` : 'For comparison, neat handwriting is usually about 18–30 pt.'; });
     window.liveBackup?.status().then((t) => { const el = document.getElementById('backupStatus'); if (el) el.textContent = t; });
 
     document.getElementById('set-apiKey')?.addEventListener('change', () => this.fillModels());
@@ -188,6 +191,36 @@ export class SettingsUI {
     this.renderFriction();
     this.bind();
     this.dlg.showModal();
+  }
+
+  // Each section folds away with a tap on its heading (all open by default). Which ones you closed is
+  // remembered in this browser, by section title. Only the view changes: no setting is touched.
+  makeCollapsible() {
+    const KEY = 'live-board-settings-collapsed';
+    let closed = {};
+    try { closed = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch { closed = {}; }
+    const remember = () => { try { localStorage.setItem(KEY, JSON.stringify(closed)); } catch {} };
+    this.dlg.querySelectorAll('.scroll > fieldset').forEach((fs) => {
+      const lg = fs.querySelector(':scope > legend');
+      if (!lg) return;
+      const title = lg.textContent.trim();
+      const set = (isClosed) => {
+        fs.classList.toggle('collapsed', isClosed);
+        lg.setAttribute('aria-expanded', String(!isClosed));
+      };
+      fs.classList.add('collapsible');
+      lg.setAttribute('role', 'button');
+      lg.tabIndex = 0;
+      set(!!closed[title]);
+      const toggle = () => {
+        const now = !fs.classList.contains('collapsed');
+        set(now);
+        if (now) closed[title] = true; else delete closed[title];
+        remember();
+      };
+      lg.addEventListener('click', toggle);
+      lg.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
   }
 
   applyWhen() {

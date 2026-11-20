@@ -56,11 +56,16 @@ export class Sessions {
     this.query = '';
     this.found = null; // results of "ask Claude to find"
     this.openMenu = null;
+    // Folders (nest as deep as you like): kv 'folders' = [{ id, name, parent }]; a session's meta.folder is its
+    // folder's id (null or a folder that no longer exists = the top level, where every older session lives).
+    this.folders = [];
+    this.folder = null; // the folder the drawer is showing (and where new sessions go)
   }
 
   // ---------- startup ----------
   async init() {
     this.bindUI(); // buttons respond even while saved sessions are still loading
+    try { this.folders = (await idb.get('kv', 'folders')) || []; } catch { this.folders = []; }
     await this.purgeTrash();
     let metas = await this.allMetas();
     if (!metas.length) {
@@ -96,11 +101,12 @@ export class Sessions {
     return all.map((m) => (this.meta && m.id === this.meta.id ? this.meta : m));
   }
 
-  async create({ pages = [], chat = [], exchanges = [], title = 'Untitled session', titleAuto = true, subject = '', parent = null, dirty = false, notesFrom, layout = null } = {}) {
+  async create({ pages = [], chat = [], exchanges = [], title = 'Untitled session', titleAuto = true, subject = '', parent = null, dirty = false, notesFrom, layout = null, folder } = {}) {
     const id = uid();
     const now = Date.now();
     // layout: null = freeform (endless page); { size, orient, scroll, paper } = notebook. The type is fixed at creation.
-    const meta = { id, title, titleAuto, subject, pinned: false, created: now, updated: now, deletedAt: null, cost: 0, thumb: null, summary: '', recap: '', searchText: '', parent, dirty, layout };
+    // a new session goes into the folder the drawer is showing, unless told otherwise
+    const meta = { id, title, titleAuto, subject, pinned: false, created: now, updated: now, deletedAt: null, cost: 0, thumb: null, summary: '', recap: '', searchText: '', parent, dirty, layout, folder: folder !== undefined ? folder : this.folderOk(this.folder) };
     await idb.set('sessions', id, meta);
     await idb.set('sessionData', id, { pages, chat, exchanges, snap: notesFrom?.snap || null });
     return id;
@@ -211,6 +217,7 @@ export class Sessions {
     this.loading = true;
     this.currentId = id;
     this.meta = meta;
+    this.folder = this.folderOk(meta.folder); // the drawer shows where this session lives
     this.chat = data.chat || [];
     this.snap = data.snap || null;
     this.agent.stop();
@@ -329,7 +336,7 @@ export class Sessions {
     const copy = structuredClone(data);
     const newId = await this.create({
       pages: copy.pages, chat: copy.chat, exchanges: copy.exchanges,
-      title: `${meta.title} (branch)`, titleAuto: false, subject: meta.subject, parent: id, notesFrom: { snap: copy.snap }, layout: meta.layout || null,
+      title: `${meta.title} (branch)`, titleAuto: false, subject: meta.subject, parent: id, notesFrom: { snap: copy.snap }, layout: meta.layout || null, folder: this.folderOk(meta.folder),
     });
     const m = await idb.get('sessions', newId);
     Object.assign(m, { summary: meta.summary, recap: meta.recap, thumb: meta.thumb, searchText: meta.searchText });
@@ -381,6 +388,121 @@ export class Sessions {
     this.renderDrawer();
   }
 
+  // ---------- folders ----------
+  folderOk(id) { return id && this.folders.some((f) => f.id === id) ? id : null; }
+  folderById(id) { return this.folders.find((f) => f.id === id) || null; }
+
+  // [root … folder] for breadcrumbs and "in Physics › EM" labels
+  folderPath(id) {
+    const out = [];
+    for (let f = this.folderById(id), n = 0; f && n < 50; f = this.folderById(f.parent), n++) out.unshift(f);
+    return out;
+  }
+
+  folderLabel(id) { return this.folderPath(id).map((f) => f.name).join(' › '); }
+
+  // the folder and everything inside it, at any depth
+  folderAndBelow(id) {
+    const ids = new Set([id]);
+    let grew = true;
+    while (grew) { grew = false; for (const f of this.folders) if (f.parent && ids.has(f.parent) && !ids.has(f.id)) { ids.add(f.id); grew = true; } }
+    return ids;
+  }
+
+  async saveFolders() {
+    try { await idb.set('kv', 'folders', this.folders); } catch (e) { this.panel.add('error', 'Could not save folders: ' + e.message, { noLog: true }); }
+  }
+
+  async newFolder() {
+    const where = this.folderLabel(this.folder);
+    const name = prompt(where ? `New folder inside "${where}"` : 'New folder', '');
+    if (!name || !name.trim()) return;
+    this.folders.push({ id: `f-${uid()}`, name: name.trim().slice(0, 80), parent: this.folderOk(this.folder), created: Date.now() });
+    await this.saveFolders();
+    this.renderDrawer();
+  }
+
+  async renameFolder(id) {
+    const f = this.folderById(id);
+    if (!f) return;
+    const name = prompt('Folder name', f.name);
+    if (!name || !name.trim()) return;
+    f.name = name.trim().slice(0, 80);
+    await this.saveFolders();
+  }
+
+  // Deleting a folder never deletes sessions: what was inside moves up one level.
+  async deleteFolder(id) {
+    const f = this.folderById(id);
+    if (!f) return;
+    const metas = (await this.allMetas()).filter((m) => m.folder === id);
+    const subs = this.folders.filter((x) => x.parent === id);
+    const up = this.folderLabel(f.parent) || 'the top level';
+    if ((metas.length || subs.length) && !confirm(`Delete the folder "${f.name}"?\n\nNothing is deleted with it: its ${metas.length} session(s) and ${subs.length} folder(s) move to ${up}.`)) return;
+    for (const x of subs) x.parent = f.parent || null;
+    for (const m of metas) await this.update(m.id, { folder: f.parent || null });
+    this.folders = this.folders.filter((x) => x.id !== id);
+    if (this.folder === id) this.folder = f.parent || null;
+    await this.saveFolders();
+  }
+
+  // The "Move to…" sheet: every folder as a tree; pick one (or the top level).
+  pickFolder({ title, current, exclude = new Set() }) {
+    return new Promise((resolve) => {
+      const d = $('#moveDlg');
+      $('#moveTitle').textContent = title;
+      const rows = [];
+      const walk = (parent, depth) => {
+        for (const f of this.folders.filter((x) => (x.parent || null) === parent).sort((a, b) => a.name.localeCompare(b.name))) {
+          if (exclude.has(f.id)) continue;
+          rows.push(`<button type="button" class="mv-row${f.id === current ? ' here' : ''}" data-to="${f.id}" style="padding-left:${14 + depth * 22}px"${f.id === current ? ' disabled' : ''}><span class="mv-ico">📁</span>${escapeHtml(f.name)}${f.id === current ? ' <small>(here now)</small>' : ''}</button>`);
+          walk(f.id, depth + 1);
+        }
+      };
+      walk(null, 1);
+      $('#moveList').innerHTML = `<button type="button" class="mv-row${!current ? ' here' : ''}" data-to=""${!current ? ' disabled' : ''}><span class="mv-ico">🗂</span>Sessions (top level)${!current ? ' <small>(here now)</small>' : ''}</button>${rows.join('')}`;
+      const done = (v) => { d.removeEventListener('click', onClick); d.removeEventListener('close', onClose); if (d.open) d.close(); resolve(v); };
+      const onClick = async (e) => {
+        if (e.target === d || e.target.closest('#moveCancel')) return done(undefined);
+        if (e.target.closest('#moveNew')) {
+          const name = prompt('New folder (at the top level; move it later if you like)', '');
+          if (name && name.trim()) {
+            const f = { id: `f-${uid()}`, name: name.trim().slice(0, 80), parent: null, created: Date.now() };
+            this.folders.push(f);
+            await this.saveFolders();
+            return done(f.id);
+          }
+          return;
+        }
+        const b = e.target.closest('[data-to]');
+        if (b && !b.disabled) done(b.dataset.to || null);
+      };
+      const onClose = () => done(undefined);
+      d.addEventListener('click', onClick);
+      d.addEventListener('close', onClose);
+      d.showModal();
+    });
+  }
+
+  async moveSession(id) {
+    const m = (await this.allMetas()).find((x) => x.id === id);
+    if (!m) return;
+    const to = await this.pickFolder({ title: `Move "${m.title}" to…`, current: this.folderOk(m.folder) });
+    if (to === undefined) return;
+    await this.update(id, { folder: to });
+    this.renderDrawer();
+  }
+
+  async moveFolder(id) {
+    const f = this.folderById(id);
+    if (!f) return;
+    const to = await this.pickFolder({ title: `Move the folder "${f.name}" to…`, current: f.parent || null, exclude: this.folderAndBelow(id) });
+    if (to === undefined) return;
+    f.parent = to;
+    await this.saveFolders();
+    this.renderDrawer();
+  }
+
   // ---------- for Claude (tools) ----------
   async listForClaude() {
     return (await this.allMetas())
@@ -412,7 +534,7 @@ export class Sessions {
     const s = structuredClone(settings);
     delete s.apiKey;
     if (s.github) delete s.github.token;
-    const blob = new Blob([JSON.stringify({ app: 'live-board', version: 1, exported: new Date().toISOString(), settings: s, sessions, books })], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ app: 'live-board', version: 1, exported: new Date().toISOString(), settings: s, sessions, books, folders: this.folders })], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `live-board-backup-${new Date().toLocaleDateString('en-CA')}.json`;
@@ -441,6 +563,12 @@ export class Sessions {
       await idb.set('sessionData', meta.id, data || { pages: [], chat: [], exchanges: [] });
       existing ? updated++ : added++;
     }
+    // folders: add the ones not here yet (yours keep their names and places)
+    let nf = 0;
+    for (const f of Array.isArray(j.folders) ? j.folders : []) {
+      if (f?.id && !this.folderById(f.id)) { this.folders.push({ id: f.id, name: String(f.name || 'Folder'), parent: f.parent || null, created: f.created || Date.now() }); nf++; }
+    }
+    if (nf) await this.saveFolders();
     let pdfs = 0;
     for (const b of j.books || []) {
       const have = await idb.get('library', b.id);
@@ -459,7 +587,7 @@ export class Sessions {
       if (s.github) delete s.github.token;
       setSettings(s);
     }
-    this.panel.add('info', `Restored: ${added} new session(s), ${updated} updated${pdfs ? `, ${pdfs} PDF(s)` : ''}. Sessions newer here were kept.`, { noLog: true });
+    this.panel.add('info', `Restored: ${added} new session(s), ${updated} updated${pdfs ? `, ${pdfs} PDF(s)` : ''}${nf ? `, ${nf} folder(s)` : ''}. Sessions newer here were kept.`, { noLog: true });
     // if the open session was replaced by a newer copy, reload it
     const cur = await idb.get('sessions', this.currentId);
     if (cur && this.meta && cur.updated > this.meta.updated) await this.open(cur.id, { initial: true });
@@ -540,6 +668,14 @@ export class Sessions {
       this.renderDrawer();
     });
     $('#sessionList').addEventListener('click', (e) => this.onListClick(e));
+    $('#newFolder').addEventListener('click', () => this.newFolder());
+    $('#sessionCrumbs').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-crumb]');
+      if (!c) return;
+      this.folder = c.dataset.crumb || null;
+      this.openMenu = null;
+      this.renderDrawer();
+    });
 
     // Session materials (PDFs for this session only)
     const mat = makePopover($('#matPop'), '#matBtn');
@@ -616,18 +752,40 @@ export class Sessions {
       list = list.filter((m) => { const t = `${m.title} ${m.subject} ${m.searchText || ''}`.toLowerCase(); return words.every((w) => t.includes(w)); });
     }
     if (!this.found) list.sort((a, b) => (this.filter === 'all' ? (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) : 0) || b.updated - a.updated);
+    // Folder view: "All" with no search shows one folder at a time (its folders, then its sessions);
+    // searching, Pinned, a subject or Trash list sessions from every folder, each with where it lives.
+    const browsing = this.filter === 'all' && !words.length && !this.found;
+    this.folder = this.folderOk(this.folder);
+    if (browsing) list = list.filter((m) => this.folderOk(m.folder) === this.folder);
+    const path = this.folderPath(this.folder);
+    $('#sessionCrumbs').hidden = !browsing;
+    $('#sessionCrumbs').innerHTML = `<button type="button" data-crumb=""${path.length ? '' : ' class="here"'}>Sessions</button>${path.map((f, i) => `<span>›</span><button type="button" data-crumb="${f.id}"${i === path.length - 1 ? ' class="here"' : ''}>${escapeHtml(f.name)}</button>`).join('')}`;
+    const subs = browsing ? this.folders.filter((f) => (f.parent || null) === this.folder).sort((a, b) => a.name.localeCompare(b.name)) : [];
+    const folderRows = subs.map((f) => {
+      const below = this.folderAndBelow(f.id);
+      const n = live.filter((m) => below.has(this.folderOk(m.folder))).length;
+      const k = this.folders.filter((x) => x.parent === f.id).length;
+      return `<div class="s-item s-folder" data-folder="${f.id}">
+        <div class="s-row" data-enter>
+          <div class="s-thumb s-fico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></div>
+          <div class="s-body"><div class="s-title">${escapeHtml(f.name)}</div><div class="s-meta">${n} session${n === 1 ? '' : 's'}${k ? ` · ${k} folder${k === 1 ? '' : 's'}` : ''}</div></div>
+          <button type="button" class="s-more" data-fmore aria-label="Folder options">⋯</button>
+        </div>
+        <div class="s-actions"${this.openMenu === f.id ? '' : ' hidden'}><button type="button" data-fact="rename">Rename</button><button type="button" data-fact="move">Move to…</button><button type="button" data-fact="delete" class="danger">Delete folder</button></div>
+      </div>`;
+    }).join('');
     $('#askFind').hidden = !this.query || !settings.apiKey || this.filter === 'trash';
     $('#askFind').textContent = this.found ? 'Show normal search results' : `Ask Claude to find "${this.query.slice(0, 40)}"`;
 
     const why = Object.fromEntries((this.found || []).map((f) => [f.id, f.why]));
-    $('#sessionList').innerHTML = list.map((m) => {
+    $('#sessionList').innerHTML = folderRows + list.map((m) => {
       const cur = m.id === this.currentId;
       const metaLine = this.filter === 'trash'
         ? `deleted ${ago(m.deletedAt)} · removed for good after ${TRASH_DAYS} days`
-        : [m.subject, ago(m.updated), fmt(m.cost || 0)].filter(Boolean).map(escapeHtml).join(' · ');
+        : [browsing ? '' : this.folderOk(m.folder) ? `📁 ${this.folderLabel(m.folder)}` : '', m.subject, ago(m.updated), fmt(m.cost || 0)].filter(Boolean).map(escapeHtml).join(' · ');
       const actions = this.filter === 'trash'
         ? `<button type="button" data-act="restore">Restore</button><button type="button" data-act="purge" class="danger">Delete for good</button>`
-        : `<button type="button" data-act="rename">Rename</button><button type="button" data-act="subject">Subject</button><button type="button" data-act="pin">${m.pinned ? 'Unpin' : 'Pin'}</button><button type="button" data-act="setup">Page setup</button><button type="button" data-act="branch">Branch</button><button type="button" data-act="trash" class="danger">Delete</button>`;
+        : `<button type="button" data-act="rename">Rename</button><button type="button" data-act="subject">Subject</button><button type="button" data-act="pin">${m.pinned ? 'Unpin' : 'Pin'}</button><button type="button" data-act="move">Move to…</button><button type="button" data-act="setup">Page setup</button><button type="button" data-act="branch">Branch</button><button type="button" data-act="trash" class="danger">Delete</button>`;
       return `<div class="s-item${cur ? ' current' : ''}" data-id="${m.id}">
         <div class="s-row" data-open>
           <div class="s-thumb">${m.thumb ? `<img alt="" src="data:image/jpeg;base64,${m.thumb}">` : ''}</div>
@@ -640,12 +798,23 @@ export class Sessions {
         </div>
         <div class="s-actions"${this.openMenu === m.id ? '' : ' hidden'}>${actions}</div>
       </div>`;
-    }).join('') || `<div class="muted s-empty">${this.filter === 'trash' ? 'Trash is empty.' : words.length ? 'No sessions match.' : 'No sessions here yet.'}</div>`;
+    }).join('') + (folderRows || list.length ? '' : `<div class="muted s-empty">${this.filter === 'trash' ? 'Trash is empty.' : words.length ? 'No sessions match.' : this.folder ? 'This folder is empty. Tap + New to start a session here, or move one in with ⋯ → Move to….' : 'No sessions here yet.'}</div>`);
   }
 
   async onListClick(e) {
     const item = e.target.closest('.s-item');
     if (!item) return;
+    if (item.dataset.folder) {
+      const fid = item.dataset.folder;
+      if (e.target.closest('[data-fmore]')) { this.openMenu = this.openMenu === fid ? null : fid; return this.renderDrawer(); }
+      const fact = e.target.closest('[data-fact]')?.dataset.fact;
+      if (fact === 'rename') await this.renameFolder(fid);
+      else if (fact === 'move') await this.moveFolder(fid);
+      else if (fact === 'delete') await this.deleteFolder(fid);
+      else if (e.target.closest('[data-enter]')) this.folder = fid;
+      this.openMenu = null;
+      return this.renderDrawer();
+    }
     const id = item.dataset.id;
     if (e.target.closest('[data-more]')) {
       this.openMenu = this.openMenu === id ? null : id;
@@ -667,6 +836,7 @@ export class Sessions {
       if (s !== null) await this.update(id, { subject: s.trim() });
     } else if (act === 'pin') await this.update(id, { pinned: !m.pinned });
     else if (act === 'branch') await this.branch(id);
+    else if (act === 'move') await this.moveSession(id);
     else if (act === 'setup') { if (id !== this.currentId) await this.open(id); else this.closeDrawer(); this.openPageSetup(); }
     else if (act === 'trash') {
       if (confirm(`Move "${m.title}" to the trash? You can restore it for ${TRASH_DAYS} days.`)) await this.trash(id);

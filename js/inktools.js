@@ -53,7 +53,7 @@ export function initInkTools({ selectPen, selectEraser }) {
 
   function chooseColor(c, { live = false } = {}) {
     if (live) { settings.penColor = c; refresh(); return; } // while dragging in the system picker
-    const recent = [c, ...(settings.recentColors || []).filter((x) => x.toLowerCase() !== c.toLowerCase())].slice(0, 3);
+    const recent = [c, ...(settings.recentColors || []).filter((x) => x.toLowerCase() !== c.toLowerCase())].slice(0, 4);
     setSettings({ penColor: c, recentColors: recent });
     selectPen();
   }
@@ -111,8 +111,9 @@ export function initInkTools({ selectPen, selectEraser }) {
     colorInput.value = /^#[0-9a-f]{6}$/i.test(c) ? c : '#1d1d1f';
     penPop.pop.querySelectorAll('[data-color]').forEach((b) => b.classList.toggle('active', b.dataset.color.toLowerCase() === c.toLowerCase()));
     penPop.pop.querySelectorAll('[data-width]').forEach((b) => b.classList.toggle('active', Math.abs(+b.dataset.width - w) < 0.05));
-    $('#recentColors').innerHTML = (settings.recentColors || [])
-      .map((rc) => `<button type="button" class="swatch${rc.toLowerCase() === c.toLowerCase() ? ' active' : ''}" data-recent="${rc}" style="background:${rc}" aria-label="Recent colour ${rc}"></button>`)
+    // the colour in use is the bordered dot; next to it, the three colours used before it (no borders)
+    $('#recentColors').innerHTML = (settings.recentColors || []).filter((rc) => rc.toLowerCase() !== c.toLowerCase()).slice(0, 3)
+      .map((rc) => `<button type="button" class="swatch" data-recent="${rc}" style="background:${rc}" aria-label="Recent colour ${rc}"></button>`)
       .join('');
 
     const es = settings.eraserSize;

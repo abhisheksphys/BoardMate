@@ -48,6 +48,7 @@ export const DEFAULTS = {
   aiSizeMode: 'mimic',
   aiSizeScale: 1, // mimic: × your handwriting where it writes (1 = same, 1.2 = a bit larger)
   aiSizeManual: 1, // manual: × your average writing size on the page
+  aiSizeFixed: 18, // fixed: the same size everywhere, in points (as in a document; 12 = printed text)
   aiWeightMode: 'manual',
   aiWeightManual: 0, // manual: line thickness, same units as Pen width (0 = normal type)
   aiColorMode: 'manual',
@@ -92,7 +93,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'showMarks',
+  'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 
