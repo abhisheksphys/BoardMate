@@ -292,12 +292,22 @@ export class Board {
     if (e.pointerType === 'touch') {
       this.touches.set(e.pointerId, this.evtPos(e));
       try { this.c.setPointerCapture(e.pointerId); } catch {}
-      if (!this.fingerDraws() || this.touches.size >= 2) {
-        if (this.drawing && this.drawing.pointerType === 'touch') this.drawing = null;
+      // Select tool: one finger on an image or block grabs it (move, or resize at the corner handle);
+      // one finger on empty space still pans, two fingers still zoom.
+      const grabs = this.touches.size === 1 && this.tool === 'select' && !this.locked && this.grabbable(e);
+      if (grabs) this.touches.delete(e.pointerId);
+      else if (!this.fingerDraws() || this.touches.size >= 2) {
+        const d = this.drawing;
+        if (d && d.pointerType === 'touch') {
+          // a second finger arrived: put a half-dragged item back, then zoom/pan
+          if (d.move) Object.assign(d.move, d.from);
+          if (d.resize) Object.assign(d.resize, d.from);
+          this.drawing = null;
+          this.render();
+        }
         this.startGesture();
         return;
-      }
-      this.touches.delete(e.pointerId); // single finger drawing
+      } else this.touches.delete(e.pointerId); // single finger drawing
     }
     if (this.drawing) {
       // The previous stroke's pen-up never arrived (it happens with very fast writing):
@@ -324,7 +334,7 @@ export class Board {
       this.eraseAt(w);
     } else if (this.tool === 'select') {
       const a = this.activeBlock;
-      if (a && a.kind === 'image' && this.page.blocks.includes(a) && this.hitHandle(a, w)) {
+      if (a && a.kind === 'image' && this.page.blocks.includes(a) && this.hitHandle(a, w, e.pointerType === 'touch')) {
         // drag the corner handle to resize (keeps the image's proportions)
         this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h }, start: w };
       } else {
@@ -337,9 +347,16 @@ export class Board {
     this.renderLive();
   }
 
-  hitHandle(b, w) {
-    const r = 18 / this.page.view.z;
+  hitHandle(b, w, finger = false) {
+    const r = (finger ? 30 : 18) / this.page.view.z; // a fingertip needs a bigger target than the Pencil
     return Math.hypot(w.x - (b.x + b.w), w.y - (b.y + b.h)) < r;
+  }
+
+  grabbable(e) {
+    const p = this.evtPos(e);
+    const w = this.toWorld(p.sx, p.sy);
+    const a = this.activeBlock;
+    return (a && a.kind === 'image' && this.page.blocks.includes(a) && this.hitHandle(a, w, true)) || !!this.hitBlock(w);
   }
 
   deleteActiveBlock() {

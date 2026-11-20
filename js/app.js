@@ -38,11 +38,9 @@ function askFrom(text, origin, label) {
   agent.ask(text, { selection: board.selection, origin });
 }
 
-// ---------- sessions (each has its own pages, chat, notes and PDFs; saved automatically) ----------
 const sessions = new Sessions({ board, panel, agent });
 agent.sessions = sessions;
 window.liveSessions = sessions;
-await sessions.init();
 
 // ---------- toolbar ----------
 function selectTool(name) {
@@ -76,11 +74,11 @@ $('#pageLabel').addEventListener('click', () => {
   if (name) { board.page.name = name; emit('page', { page: board.page, index: board.pi, count: board.pages.length }); board.saveSoon(); }
 });
 function setPageLabel({ page, index, count }) {
+  if (!page) return;
   $('#pageLabel').textContent = count > 1 ? `${page.name} · ${index + 1}/${count}` : page.name;
   $('#pageLabel').title = `${page.name} (page ${index + 1} of ${count}) — tap to rename`;
 }
 on('page', setPageLabel);
-setPageLabel({ page: board.page, index: board.pi, count: board.pages.length });
 
 
 $('#attention').addEventListener('change', (e) => setSettings({ attention: e.target.value }));
@@ -187,6 +185,17 @@ on('settings', applySettings);
 applySettings();
 
 // ---------- start ----------
+// Every button is wired up above, so the app is usable even if loading sessions has a problem.
+on('storage-error', (m) => window.showAppError?.(m));
+try {
+  await sessions.init();
+} catch (e) {
+  window.showAppError?.(`Your sessions could not be loaded (${e?.message || e}). You can still write on a blank page; tell Claude in chat what happened.`);
+  if (!board.page) board.load([]);
+}
+setPageLabel({ page: board.page, index: board.pi, count: board.pages.length });
+window.liveBoardReady = true;
+
 if (!settings.apiKey) settingsUI.open(true);
 else {
   setTimeout(warmCas, 6000);

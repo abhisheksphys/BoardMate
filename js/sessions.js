@@ -59,6 +59,7 @@ export class Sessions {
 
   // ---------- startup ----------
   async init() {
+    this.bindUI(); // buttons respond even while saved sessions are still loading
     await this.purgeTrash();
     let metas = await this.allMetas();
     if (!metas.length) {
@@ -85,7 +86,6 @@ export class Sessions {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.leave({ staying: true });
     });
-    this.bindUI();
   }
 
   // ---------- data ----------

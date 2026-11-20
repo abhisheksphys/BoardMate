@@ -36,3 +36,8 @@ Keep cost low: default to the fast model, keep the cached prefix (tools, system 
 - New behaviour should be configurable through `settings.js` where reasonable, with a field in `settingsUI.js`.
 - Communicate between modules with the event bus in `js/bus.js` (`emit`/`on`) rather than new globals.
 - Keep tool descriptions precise; Claude relies on them.
+
+## Versioning (important)
+Browsers cache files aggressively. Every change must bump the version so the new files are fetched:
+use one new value (e.g. `2026.11.21-0930`) in **all** of: `js/version.js`, the `?v=` of `js/app.js` in `index.html`,
+and every entry of the import map in `index.html`. Add an import-map entry for any new module.

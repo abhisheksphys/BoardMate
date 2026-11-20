@@ -2,6 +2,7 @@
 import { settings, saveSettings, getPath, setPath } from './settings.js';
 import { addPdf, listBooks, removeBook } from './library.js';
 import { escapeHtml } from './bus.js';
+import { VERSION } from './version.js';
 
 const SECTIONS = [
   ['Claude', [
@@ -100,7 +101,7 @@ export class SettingsUI {
       : '';
     this.dlg.innerHTML = `
       <form method="dialog" class="settings">
-        <header><h2>Settings</h2><button value="cancel" class="ghost" aria-label="Close">✕</button></header>
+        <header><h2>Settings <small class="muted" style="font-weight:400">version ${VERSION}</small></h2><button value="cancel" class="ghost" aria-label="Close">✕</button></header>
         <div class="scroll">
           ${intro}
           ${SECTIONS.map(([title, fields]) => `<fieldset><legend>${escapeHtml(title)}</legend>${fields.map(fieldHtml).join('')}</fieldset>`).join('')}
