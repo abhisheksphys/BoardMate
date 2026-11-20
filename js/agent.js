@@ -44,7 +44,7 @@ Understanding the board
 - Read the page images directly, the way you would read a photo of notes or a book page. The user refers to things freely ("the one that looks like Maxwell's equation", "my second line", "what I just crossed out", "this" while something is selected). Work out what they mean from the image; ask only if it is genuinely ambiguous.
 - Blue typeset blocks with a thin bar on their left are things you wrote earlier. Small circled symbols are margin marks.
 - Pictures on the page (figures, photos, screenshots, book pages) were pasted by the user; read them as part of the page.
-- A dashed blue rectangle (and the second image, when present) is the user's current selection: "this" usually means it.
+- The user's current selection (a box, or a freehand lasso outline) is given in board_context.selection, and a second image shows it close up; with a lasso, everything outside the outline is faded. "This" usually means what they selected.
 - If something is too small or messy to read, call get_region for a sharper view.
 - Speech-to-text garbles math words ("curls" for curl, "dell" for del, "partial tea" for partial t); interpret charitably.
 
@@ -160,7 +160,7 @@ export class Agent {
       session_type: b.layout ? `notebook: page ${b.pi + 1} of ${b.pages.length}, ${b.layout.size} ${b.layout.orient}; the image shows the page. Board writing stays on the page; what doesn't fit continues on the next page.` : 'freeform (an endless page)',
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
-      selection: selection ? b.rectToImage(snap, selection) : null,
+      selection: selection ? { ...b.rectToImage(snap, selection), shape: selection.path ? 'lasso (only what is inside the outline)' : 'box' } : null,
       your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ id: x.id, at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
       notebook: page.notebook.slice(-40).map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
       // the session's other pages, as text only (cheap); view_page fetches one when it is needed
@@ -306,12 +306,13 @@ export class Agent {
     const sel = b.selection;
     const cb = b.contentBounds();
     const vis = b.visibleWorld();
-    const fontPx = b.aiFontSize(sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null, sel);
+    const style = b.aiStyle(sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null, sel);
+    const fontPx = style.fontPx;
     const gap = fontPx * 1.1;
     const pos = sel ? { x: sel.x + sel.w + gap * 1.5, y: sel.y } : cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
     b.setLocked(true);
     try {
-      await b.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs });
+      await b.addBlock({ lines, x: pos.x, y: pos.y, fontPx, color: style.color, strokePx: style.strokePx }, { animateMs: settings.writeAnimationMs });
     } finally {
       b.setLocked(false);
     }

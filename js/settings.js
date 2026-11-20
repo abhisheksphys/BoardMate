@@ -44,9 +44,14 @@ export const DEFAULTS = {
   // Board
   allowBoardWrite: true,
   writeAnimationMs: 200,
-  aiMatchSize: true, // size Claude's writing like your handwriting where it goes
-  aiSizeScale: 1, // then scale it (0.9 = a bit smaller, 1.1 = a bit larger)
-  aiColor: '#1a5fd0',
+  // How Claude's writing looks. Each: 'mimic' (from your writing where it goes) or 'manual' (a set value).
+  aiSizeMode: 'mimic',
+  aiSizeScale: 1, // mimic: × your handwriting where it writes (1 = same, 1.2 = a bit larger)
+  aiSizeManual: 1, // manual: × your average writing size on the page
+  aiWeightMode: 'manual',
+  aiWeightManual: 0, // manual: line thickness, same units as Pen width (0 = normal type)
+  aiColorMode: 'manual',
+  aiColor: '#1a5fd0', // manual colour
   penColor: '#1d1d1f',
   penWidth: 2.4,
   recentColors: ['#1d1d1f', '#c0392b', '#1e7a46'],
@@ -87,7 +92,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'showMarks',
+  'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 
@@ -112,6 +117,8 @@ function load() {
 
 export const settings = load();
 delete settings.voiceIn; // old setting: the mic is now always tap-on / tap-off
+if (settings.aiMatchSize === false) settings.aiSizeMode = 'manual'; // old on/off switch for size matching
+delete settings.aiMatchSize;
 // Removed: both restarted listening without a tap, and on iPad a run started that way hears nothing.
 delete settings.voiceFreshRuns; delete settings.voiceWatchdogSec;
 

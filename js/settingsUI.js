@@ -40,14 +40,18 @@ const SECTIONS = [
   ]],
   ['Board', [
     { k: 'allowBoardWrite', label: 'Claude may write on the board', type: 'checkbox' },
-    { k: 'aiMatchSize', label: "Size Claude's writing to match my handwriting where it writes", type: 'checkbox' },
-    { k: 'aiSizeScale', label: "Claude's writing size relative to mine (1 = same, 0.9 = a bit smaller, 1.2 = larger)", type: 'number', step: 0.05 },
+    { k: 'aiSizeMode', label: "Claude's writing size", type: 'select', options: [['mimic', 'Mimic: like my handwriting where it writes'], ['manual', 'Manual: a set size']] },
+    { k: 'aiSizeScale', label: 'Size, in units of my handwriting there (1 = same, 0.9 = a bit smaller, 1.2 = larger)', type: 'number', step: 0.05, when: ['aiSizeMode', 'mimic'] },
+    { k: 'aiSizeManual', label: 'Size, in units of my average writing on the page (1 = same, 1.5 = half as big again)', type: 'number', step: 0.05, when: ['aiSizeMode', 'manual'], avgHint: true },
+    { k: 'aiWeightMode', label: "Claude's stroke width", type: 'select', options: [['manual', 'Manual: a set thickness'], ['mimic', 'Mimic: as thick as my pen strokes']] },
+    { k: 'aiWeightManual', label: 'Stroke width (same units as Pen width; 0 = normal type)', type: 'number', step: 0.2, when: ['aiWeightMode', 'manual'] },
+    { k: 'aiColorMode', label: "Claude's colour", type: 'select', options: [['manual', 'Manual: a colour I pick'], ['mimic', 'Mimic: the ink colour I write in there']] },
+    { k: 'aiColor', label: 'Colour', type: 'color', when: ['aiColorMode', 'manual'] },
     { k: 'writeAnimationMs', label: 'Delay between written lines (ms)', type: 'number' },
-    { k: 'aiColor', label: 'Claude colour', type: 'color' },
     { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
     { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
     { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },
-    { k: 'paper', label: 'Paper for new pages (and pages that haven\'t picked their own)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
+    { k: 'paper', label: 'Default paper for new freeform sessions (each session\'s own paper: the page setup icon next to its title)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
     { k: 'paperSpacing', label: 'Line / dot spacing on the paper', type: 'number', step: 2 },
     { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
     { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
@@ -80,10 +84,16 @@ const SECTIONS = [
   ]],
 ];
 
+// A field shown only while another (a mode select) has a given value: `when: [key, value]`.
 function fieldHtml(f) {
+  const inner = fieldInner(f);
+  return f.when ? `<div class="when" data-when="set-${f.when[0]}" data-is="${f.when[1]}">${inner}</div>` : inner;
+}
+
+function fieldInner(f) {
   const id = 'set-' + f.k.replace(/\./g, '-');
   const v = getPath(settings, f.k);
-  const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : '';
+  const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : f.avgHint ? '<small class="avg-hint"></small>' : '';
   if (f.type === 'checkbox') return `<label class="row check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> <span>${escapeHtml(f.label)}</span></label>`;
   if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
   if (f.type === 'model') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}" data-model>${modelOptions(cachedModels(), v)}</select>${hint}</label>`;
@@ -140,17 +150,6 @@ export class SettingsUI {
             <div id="backupStatus" class="muted small"></div>
             <div class="buttons"><button type="button" id="backupNow">Back up now</button><button type="button" id="backupRestore" class="ghost">Restore from GitHub</button></div>
           </fieldset>
-          <fieldset id="sessionLayoutBox" hidden><legend>This session (notebook)</legend>
-            <label class="row"><span>Page size</span><select id="slSize"><option value="A4">A4</option><option value="A5">A5</option><option value="Letter">US Letter</option><option value="Square">Square</option></select></label>
-            <label class="row"><span>Orientation</span><select id="slOrient"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
-            <label class="row"><span>Pages scroll</span><select id="slScroll"><option value="vertical">Vertically (up / down)</option><option value="horizontal">Horizontally (left / right)</option></select></label>
-            <label class="row"><span>Paper for new pages</span><select id="slPaper"><option value="ruled">Ruled</option><option value="grid">Grid (squared)</option><option value="dots">Dots</option><option value="plain">Plain</option></select></label>
-            <div class="muted small">Changes apply right away. A smaller page can hide writing near the edges (it is kept, just outside the page).</div>
-          </fieldset>
-          <fieldset><legend>This page</legend>
-            <label class="row"><span>Paper for the page you are on</span><select id="pagePaper"><option value="plain">Plain</option><option value="dots">Dots</option><option value="ruled">Ruled (notebook)</option><option value="grid">Grid (squared)</option></select></label>
-            <div class="muted small">Changes this page right away. New pages use the "Paper for new pages" setting under Board.</div>
-          </fieldset>
           <fieldset><legend>Where the money goes</legend>
             <div id="costBreakdown" class="small"></div>
             <div class="muted small">Estimated from token counts at list prices; the Claude Console usage page is the exact record. "This month" by purpose counts from this update on.</div>
@@ -177,21 +176,25 @@ export class SettingsUI {
     this.fillVoices();
     this.fillModels();
     this.renderCosts();
+    this.applyWhen();
+    // show what "1" means right now: your average writing size on this page
+    const avg = window.liveBoard?.averageWritingSize?.();
+    this.dlg.querySelectorAll('.avg-hint').forEach((el) => { el.textContent = avg ? `Your average writing on this page is about ${Math.round(avg * 0.6)} px tall, so 1 = Claude's letters about that size.` : 'No handwriting on this page yet: 1 = a normal default size until you write.'; });
     window.liveBackup?.status().then((t) => { const el = document.getElementById('backupStatus'); if (el) el.textContent = t; });
-    const lay = window.liveSessions?.meta?.layout;
-    const box = document.getElementById('sessionLayoutBox');
-    if (box) {
-      box.hidden = !lay;
-      if (lay) { document.getElementById('slSize').value = lay.size; document.getElementById('slOrient').value = lay.orient; document.getElementById('slScroll').value = lay.scroll; document.getElementById('slPaper').value = lay.paper || 'ruled'; }
-    }
-    const pp = document.getElementById('pagePaper');
-    if (pp && window.liveBoard) pp.value = window.liveBoard.paperOf();
+
     document.getElementById('set-apiKey')?.addEventListener('change', () => this.fillModels());
     this.renderSaved();
     this.renderBooks();
     this.renderFriction();
     this.bind();
     this.dlg.showModal();
+  }
+
+  applyWhen() {
+    this.dlg.querySelectorAll('.when').forEach((el) => {
+      const ctl = document.getElementById(el.dataset.when);
+      el.hidden = !!ctl && ctl.value !== el.dataset.is;
+    });
   }
 
   renderCosts() {
@@ -280,6 +283,7 @@ export class SettingsUI {
         ta.focus(); ta.select();
       }
     });
+    d.addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') this.applyWhen(); });
     d.querySelector('#backupNow').addEventListener('click', async () => {
       const bk = window.liveBackup;
       const st = d.querySelector('#backupStatus');
@@ -292,10 +296,7 @@ export class SettingsUI {
       this.close?.();
       await window.liveBackup.restore();
     });
-    for (const [id, key] of [['#slSize', 'size'], ['#slOrient', 'orient'], ['#slScroll', 'scroll'], ['#slPaper', 'paper']]) {
-      d.querySelector(id).addEventListener('change', (e) => window.liveSessions?.setLayout({ [key]: e.target.value }));
-    }
-    d.querySelector('#pagePaper').addEventListener('change', (e) => window.liveBoard?.setPaper(e.target.value));
+
     d.querySelector('#copyWatchLog').addEventListener('click', async () => {
       const w = window.liveWatcher;
       const text = w ? w.report() : 'Watching has not started.';

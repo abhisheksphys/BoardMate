@@ -41,5 +41,5 @@ Keep cost low: default to the fast model, keep the cached prefix (tools, system 
 
 ## Versioning (important)
 Browsers cache files aggressively. Every change must bump the version so the new files are fetched:
-use one new value (e.g. `2026.11.21-0930`) in **all** of: `js/version.js`, the `?v=` of `js/app.js` in `index.html`,
+use one new value (e.g. `2026.11.21-0930`) in **all** of: `js/version.js`, the `?v=` of `js/app.js` and of `styles.css` in `index.html`,
 and every entry of the import map in `index.html`. Add an import-map entry for any new module.

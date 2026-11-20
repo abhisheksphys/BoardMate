@@ -11,7 +11,7 @@
   <title>Live Board</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2026.11.20-2346">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -48,56 +48,102 @@
     }, 9000);
   </script>
   <!-- Cache busting: every module is fetched with this update's version, so new files never mix with cached old ones. -->
-  <dialog id="newSessionDlg" class="export-dlg">
-    <h3>New session</h3>
-    <button type="button" id="nsFree"><b>Freeform</b><span>One endless page: zoom out, move anywhere, write anywhere.</span></button>
-    <button type="button" id="nsNote"><b>Notebook</b><span>Fixed-size pages you flip through, like GoodNotes: page 1, page 2…</span></button>
-    <div id="nsOptions" class="ns-options" hidden>
-      <label>Page size <select id="nsSize"><option value="A4">A4</option><option value="A5">A5</option><option value="Letter">US Letter</option><option value="Square">Square</option></select></label>
-      <label>Orientation <select id="nsOrient"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
-      <label>Paper <select id="nsPaper"><option value="ruled">Ruled</option><option value="grid">Grid (squared)</option><option value="dots">Dots</option><option value="plain">Plain</option></select></label>
-      <label>Pages scroll <select id="nsScroll"><option value="vertical">Vertically (up / down)</option><option value="horizontal">Horizontally (left / right)</option></select></label>
-      <div class="muted small">All of this can be changed later in Settings → This session.</div>
-      <div class="buttons"><button type="button" id="nsCreate">Create notebook</button></div>
+  <dialog id="newSessionDlg" class="sheet">
+    <header><h3>New session</h3><button type="button" class="sheet-x" id="nsCancel" aria-label="Close">×</button></header>
+    <div class="type-cards">
+      <button type="button" class="type-card" data-type="free">
+        <svg viewBox="0 0 64 48" aria-hidden="true"><rect x="2" y="2" width="60" height="44" rx="6" class="paper"/><path d="M12 30c6-10 12 6 18-4s10-8 14 0 6 2 8-2" class="ink"/><path d="M47 9l7 0M54 9l0 7M17 39l-7 0M10 39l0-7" class="arrow"/></svg>
+        <b>Freeform</b><span>One endless page. Zoom out, move anywhere, write anywhere.</span>
+      </button>
+      <button type="button" class="type-card" data-type="note">
+        <svg viewBox="0 0 64 48" aria-hidden="true"><rect x="22" y="6" width="28" height="38" rx="2" class="paper back"/><rect x="14" y="3" width="28" height="38" rx="2" class="paper"/><path d="M18 12h20M18 18h20M18 24h20M18 30h20M18 36h14" class="rule"/></svg>
+        <b>Notebook</b><span>Fixed-size pages you flip through, like GoodNotes.</span>
+      </button>
     </div>
-    <div class="buttons"><button type="button" id="nsCancel" class="ghost">Cancel</button></div>
+    <div id="nsOptions" class="ns-options" hidden>
+      <div class="opt"><span>Page size</span><div class="seg" data-name="size"><button type="button" data-v="A4" class="on">A4</button><button type="button" data-v="A5">A5</button><button type="button" data-v="Letter">Letter</button><button type="button" data-v="Square">Square</button></div></div>
+      <div class="opt"><span>Orientation</span><div class="seg" data-name="orient">
+        <button type="button" data-v="portrait" class="on"><svg viewBox="0 0 20 20"><rect x="5" y="2" width="10" height="16" rx="1.5"/></svg>Portrait</button>
+        <button type="button" data-v="landscape"><svg viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="10" rx="1.5"/></svg>Landscape</button></div></div>
+      <div class="opt"><span>Paper</span><div class="seg" data-name="paper">
+        <button type="button" data-v="ruled" class="on"><svg viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h14"/></svg>Ruled</button>
+        <button type="button" data-v="grid"><svg viewBox="0 0 20 20"><path d="M3 7h14M3 13h14M7 3v14M13 3v14"/></svg>Grid</button>
+        <button type="button" data-v="dots"><svg viewBox="0 0 20 20"><circle cx="6" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="6" cy="14" r="1"/><circle cx="14" cy="14" r="1"/></svg>Dots</button>
+        <button type="button" data-v="plain"><svg viewBox="0 0 20 20"><rect x="4" y="3" width="12" height="14" rx="1.5"/></svg>Plain</button></div></div>
+      <div class="opt"><span>Pages scroll</span><div class="seg" data-name="scroll">
+        <button type="button" data-v="vertical" class="on"><svg viewBox="0 0 20 20"><path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4"/></svg>Up / down</button>
+        <button type="button" data-v="horizontal"><svg viewBox="0 0 20 20"><path d="M3 10h14M7 6l-4 4 4 4M13 6l4 4-4 4"/></svg>Left / right</button></div></div>
+      <p class="hint">You can change all of this later in Settings → This session.</p>
+    </div>
+    <footer><button type="button" class="ghost" id="nsCancel2">Cancel</button><button type="button" class="primary" id="nsCreate" disabled>Create</button></footer>
   </dialog>
-  <dialog id="exportDlg" class="export-dlg">
-    <h3>Export this session</h3>
-    <button type="button" id="exportPdf"><b>PDF, as written</b><span>Your pages as they look: handwriting, Claude's blocks, pictures and paper. Free.</span></button>
-    <button type="button" id="exportTex"><b>LaTeX, typed up by Claude</b><span>Claude transcribes every page into a .tex document; save it or open it in Overleaf to get a typeset PDF. Uses the strong model (you'll see the cost first).</span></button>
-    <div class="buttons"><button type="button" id="exportCancel" class="ghost">Cancel</button></div>
+  <dialog id="pageSetupDlg" class="sheet">
+    <header><h3>Page setup <small id="psKind"></small></h3><button type="button" class="sheet-x" id="psClose" aria-label="Close">×</button></header>
+    <div class="ns-options ps-body">
+      <div class="ps-notebook">
+        <div class="opt"><span>Page size</span><div class="seg" data-name="size"><button type="button" data-v="A4">A4</button><button type="button" data-v="A5">A5</button><button type="button" data-v="Letter">Letter</button><button type="button" data-v="Square">Square</button></div></div>
+        <div class="opt"><span>Orientation</span><div class="seg" data-name="orient">
+          <button type="button" data-v="portrait"><svg viewBox="0 0 20 20"><rect x="5" y="2" width="10" height="16" rx="1.5"/></svg>Portrait</button>
+          <button type="button" data-v="landscape"><svg viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="10" rx="1.5"/></svg>Landscape</button></div></div>
+        <div class="opt"><span>Pages scroll</span><div class="seg" data-name="scroll">
+          <button type="button" data-v="vertical"><svg viewBox="0 0 20 20"><path d="M10 3v14M6 7l4-4 4 4M6 13l4 4 4-4"/></svg>Up / down</button>
+          <button type="button" data-v="horizontal"><svg viewBox="0 0 20 20"><path d="M3 10h14M7 6l-4 4 4 4M13 6l4 4-4 4"/></svg>Left / right</button></div></div>
+      </div>
+      <div class="opt"><span>Paper</span><div class="seg" data-name="paper">
+        <button type="button" data-v="ruled"><svg viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h14"/></svg>Ruled</button>
+        <button type="button" data-v="grid"><svg viewBox="0 0 20 20"><path d="M3 7h14M3 13h14M7 3v14M13 3v14"/></svg>Grid</button>
+        <button type="button" data-v="dots"><svg viewBox="0 0 20 20"><circle cx="6" cy="6" r="1"/><circle cx="14" cy="6" r="1"/><circle cx="6" cy="14" r="1"/><circle cx="14" cy="14" r="1"/></svg>Dots</button>
+        <button type="button" data-v="plain"><svg viewBox="0 0 20 20"><rect x="4" y="3" width="12" height="14" rx="1.5"/></svg>Plain</button></div></div>
+      <div class="opt"><span>Apply paper to</span><div class="seg" data-name="scope">
+        <button type="button" data-v="page">This page + new pages</button>
+        <button type="button" data-v="all">All pages</button></div></div>
+      <p class="hint" id="psHint"></p>
+    </div>
+    <footer><button type="button" class="primary" id="psDone">Done</button></footer>
+  </dialog>
+  <dialog id="exportDlg" class="sheet">
+    <header><h3>Export this session</h3><button type="button" class="sheet-x" id="exportCancel" aria-label="Close">×</button></header>
+    <div class="type-cards">
+      <button type="button" class="type-card" id="exportPdf">
+        <svg viewBox="0 0 64 48" aria-hidden="true"><rect x="16" y="3" width="32" height="42" rx="2" class="paper"/><path d="M21 14c4-6 8 4 12-2s6-4 9 0M21 24c3-4 6 3 10 0s5-3 9 0" class="ink"/><text x="32" y="40" class="tag">PDF</text></svg>
+        <b>PDF, as written</b><span>Your pages as they look: handwriting, Claude's blocks, pictures, paper. Free.</span>
+      </button>
+      <button type="button" class="type-card" id="exportTex">
+        <svg viewBox="0 0 64 48" aria-hidden="true"><rect x="16" y="3" width="32" height="42" rx="2" class="paper"/><text x="32" y="22" class="math">∇·E=ρ</text><path d="M21 29h22M21 34h16" class="rule"/><text x="32" y="43" class="tag">TeX</text></svg>
+        <b>LaTeX, typed up by Claude</b><span>A .tex document of every page; open it in Overleaf for a typeset PDF. Uses the strong model (cost shown first).</span>
+      </button>
+    </div>
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.20-2300",
-  "./js/app.js": "./js/app.js?v=2026.11.20-2300",
-  "./js/backup.js": "./js/backup.js?v=2026.11.20-2300",
-  "./js/board.js": "./js/board.js?v=2026.11.20-2300",
-  "./js/bus.js": "./js/bus.js?v=2026.11.20-2300",
-  "./js/cas.js": "./js/cas.js?v=2026.11.20-2300",
-  "./js/changes.js": "./js/changes.js?v=2026.11.20-2300",
-  "./js/claude.js": "./js/claude.js?v=2026.11.20-2300",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.20-2300",
-  "./js/costs.js": "./js/costs.js?v=2026.11.20-2300",
-  "./js/export.js": "./js/export.js?v=2026.11.20-2300",
-  "./js/github.js": "./js/github.js?v=2026.11.20-2300",
-  "./js/images.js": "./js/images.js?v=2026.11.20-2300",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.20-2300",
-  "./js/library.js": "./js/library.js?v=2026.11.20-2300",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.20-2300",
-  "./js/panel.js": "./js/panel.js?v=2026.11.20-2300",
-  "./js/perception.js": "./js/perception.js?v=2026.11.20-2300",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.20-2300",
-  "./js/settings.js": "./js/settings.js?v=2026.11.20-2300",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.20-2300",
-  "./js/storage.js": "./js/storage.js?v=2026.11.20-2300",
-  "./js/tools.js": "./js/tools.js?v=2026.11.20-2300",
-  "./js/version.js": "./js/version.js?v=2026.11.20-2300",
-  "./js/voice.js": "./js/voice.js?v=2026.11.20-2300"
+  "./js/agent.js": "./js/agent.js?v=2026.11.20-2346",
+  "./js/app.js": "./js/app.js?v=2026.11.20-2346",
+  "./js/backup.js": "./js/backup.js?v=2026.11.20-2346",
+  "./js/board.js": "./js/board.js?v=2026.11.20-2346",
+  "./js/bus.js": "./js/bus.js?v=2026.11.20-2346",
+  "./js/cas.js": "./js/cas.js?v=2026.11.20-2346",
+  "./js/changes.js": "./js/changes.js?v=2026.11.20-2346",
+  "./js/claude.js": "./js/claude.js?v=2026.11.20-2346",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.20-2346",
+  "./js/costs.js": "./js/costs.js?v=2026.11.20-2346",
+  "./js/export.js": "./js/export.js?v=2026.11.20-2346",
+  "./js/github.js": "./js/github.js?v=2026.11.20-2346",
+  "./js/images.js": "./js/images.js?v=2026.11.20-2346",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.20-2346",
+  "./js/library.js": "./js/library.js?v=2026.11.20-2346",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.20-2346",
+  "./js/panel.js": "./js/panel.js?v=2026.11.20-2346",
+  "./js/perception.js": "./js/perception.js?v=2026.11.20-2346",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.20-2346",
+  "./js/settings.js": "./js/settings.js?v=2026.11.20-2346",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.20-2346",
+  "./js/storage.js": "./js/storage.js?v=2026.11.20-2346",
+  "./js/tools.js": "./js/tools.js?v=2026.11.20-2346",
+  "./js/version.js": "./js/version.js?v=2026.11.20-2346",
+  "./js/voice.js": "./js/voice.js?v=2026.11.20-2346"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.20-2300"></script>
+  <script type="module" src="js/app.js?v=2026.11.20-2346"></script>
 </head>
 <body class="panel-right">
   <div id="errBar" role="alert" hidden><span></span><button type="button" onclick="location.reload()">Reload</button><button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true">✕</button></div>
@@ -119,6 +165,9 @@
       <button data-tool="select" class="tool" title="Select a region, or move and resize images and blocks (S)" aria-label="Select">
         <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4" /></svg>
       </button>
+      <button data-tool="lasso" class="tool" title="Lasso: circle anything to select it, any shape (L)" aria-label="Lasso">
+        <svg viewBox="0 0 24 24"><path d="M12 4c5 0 8 2.5 8 5.5S16.5 15 12 15 4 12.5 4 9.5 7 4 12 4z" stroke-dasharray="3 2.4"/><path d="M7.5 14c-1.4 1.2-1.6 3 .2 3.6 1.2.4 1.6 1.6.8 3.4"/></svg>
+      </button>
       <button id="imgBtn" title="Insert an image" aria-label="Insert image">
         <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>
       </button>
@@ -132,6 +181,9 @@
     </div>
     <div class="group pages">
       <button id="sessionTitle" class="label session-title" title="Sessions">Session</button>
+      <button id="pageSetupBtn" title="Page setup for this session: paper, and for notebooks page size, orientation, scrolling" aria-label="Page setup">
+        <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h6"/></svg>
+      </button>
       <span class="sep"></span>
       <button id="pagePrev" aria-label="Previous page"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
       <button id="pageLabel" class="label" title="Rename page">Page 1</button>

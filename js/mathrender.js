@@ -46,8 +46,8 @@ export function lineToTex(line) {
   return { tex, display: false };
 }
 
-export function texToImage(tex, { color = '#000', display = true, fontPx = 22 } = {}) {
-  const key = `${tex}|${color}|${display}|${fontPx}`;
+export function texToImage(tex, { color = '#000', display = true, fontPx = 22, strokePx = 0 } = {}) {
+  const key = `${tex}|${color}|${display}|${fontPx}|${strokePx}`;
   if (cache.has(key)) return cache.get(key);
   const p = (async () => {
     if (!(await mathReady())) {
@@ -70,6 +70,15 @@ export function texToImage(tex, { color = '#000', display = true, fontPx = 22 } 
     const exPx = fontPx * 0.44;
     const w = Math.max(1, parseFloat(svg.getAttribute('width')) * exPx);
     const h = Math.max(1, parseFloat(svg.getAttribute('height')) * exPx);
+    // Thicker letters: outline every glyph, so its lines are about strokePx thick (the font's own are ~0.075 em)
+    const extra = strokePx - fontPx * 0.075;
+    const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+    if (extra > 0.2 && vb[2] > 0) {
+      const units = (extra * vb[2]) / w; // px -> the SVG's own units
+      svg.querySelectorAll('[stroke-width]').forEach((el) => el.setAttribute('stroke-width', String(units)));
+      const g = svg.querySelector('g');
+      if (g) { g.setAttribute('stroke', 'currentColor'); g.setAttribute('stroke-width', String(units)); g.setAttribute('stroke-linejoin', 'round'); }
+    }
     svg.setAttribute('width', String(w));
     svg.setAttribute('height', String(h));
     svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');

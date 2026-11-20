@@ -216,6 +216,7 @@ export class Sessions {
     this.agent.exchanges = data.exchanges || [];
     this.agent.lastAskAt = Date.now();
     this.board.setLayout(meta.layout || null);
+    this.board.sessionPaper = meta.layout ? null : meta.paper || null; // freeform: this session's paper for new pages
     this.board.load(data.pages || []);
     this.panel.clear();
     for (const m of this.chat) this.panel.add(m.role, m.md, { noLog: true, actions: m.role === 'assistant' ? this.agent.answerActions(m.md) : undefined });
@@ -240,11 +241,46 @@ export class Sessions {
   // The "New session" button: choose freeform or notebook (and the notebook's page setup).
   chooseNewSession() {
     const d = $('#newSessionDlg');
+    this.nsType = null;
+    d.querySelectorAll('.type-card').forEach((c) => c.classList.remove('on'));
     $('#nsOptions').hidden = true;
+    $('#nsCreate').disabled = true;
+    $('#nsCreate').textContent = 'Create';
     d.showModal();
   }
 
-  // Notebook page setup, changeable any time (Settings → This session); the session type itself is not.
+  // ---------- Page setup (toolbar icon next to the title, or ⋯ → Page setup) ----------
+  // Freeform: the paper. Notebook: also page size, orientation and scrolling. Every choice applies at once.
+  openPageSetup() {
+    const d = $('#pageSetupDlg');
+    const lay = this.meta?.layout;
+    const set = (name, v) => d.querySelectorAll(`.seg[data-name="${name}"] button`).forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    d.querySelector('.ps-notebook').hidden = !lay;
+    $('#psKind').textContent = lay ? '· notebook' : '· freeform';
+    if (lay) { set('size', lay.size); set('orient', lay.orient); set('scroll', lay.scroll); }
+    set('paper', this.board.paperOf());
+    set('scope', 'page');
+    $('#psHint').textContent = lay
+      ? 'Changes show right away. A smaller page can hide writing near its edges (it is kept, just outside the page).'
+      : 'Changes show right away. Freeform sessions have one setting: the paper.';
+    d.showModal();
+  }
+
+  async pageSetupChoice(name, v) {
+    const d = $('#pageSetupDlg');
+    const scope = d.querySelector('.seg[data-name="scope"] .on')?.dataset.v || 'page';
+    const paper = d.querySelector('.seg[data-name="paper"] .on')?.dataset.v;
+    if (['size', 'orient', 'scroll'].includes(name)) return this.setLayout({ [name]: v });
+    if (name === 'paper' || (name === 'scope' && paper)) {
+      // the paper goes on this page (or every page) and becomes the session's paper for new pages
+      if (scope === 'all') { for (const p of this.board.pages) p.paper = paper; this.board.render(); this.board.saveSoon(); }
+      else this.board.setPaper(paper);
+      if (this.meta.layout) await this.setLayout({ paper });
+      else { this.meta.paper = paper; this.board.sessionPaper = paper; await idb.set('sessions', this.meta.id, this.meta); }
+    }
+  }
+
+  // Notebook page setup, changeable any time (Page setup); the session type itself is not.
   async setLayout(patch) {
     if (!this.meta?.layout) return;
     this.meta.layout = { ...this.meta.layout, ...patch };
@@ -402,14 +438,40 @@ export class Sessions {
   bindUI() {
     $('#sessionsBtn').addEventListener('click', () => this.toggleDrawer());
     $('#sessionTitle').addEventListener('click', () => this.toggleDrawer());
+    $('#pageSetupBtn').addEventListener('click', () => this.openPageSetup());
+    const ps = $('#pageSetupDlg');
+    ps.addEventListener('click', (e) => {
+      if (e.target === ps) return ps.close();
+      const b = e.target.closest('.seg button');
+      if (!b) return;
+      b.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      this.pageSetupChoice(b.parentElement.dataset.name, b.dataset.v);
+    });
+    for (const id of ['#psClose', '#psDone']) $(id).addEventListener('click', () => ps.close());
     $('#drawerClose').addEventListener('click', () => this.closeDrawer());
     $('#newSession').addEventListener('click', () => this.chooseNewSession());
-    $('#nsFree').addEventListener('click', () => { $('#newSessionDlg').close(); this.newSession(); });
-    $('#nsNote').addEventListener('click', () => { $('#nsOptions').hidden = false; });
-    $('#nsCancel').addEventListener('click', () => $('#newSessionDlg').close());
+    // New session sheet: pick a type card; Notebook shows its page setup (segmented choices); Create.
+    const dlg = $('#newSessionDlg');
+    dlg.addEventListener('click', (e) => {
+      const card = e.target.closest('.type-card');
+      if (card) {
+        dlg.querySelectorAll('.type-card').forEach((c) => c.classList.toggle('on', c === card));
+        this.nsType = card.dataset.type;
+        $('#nsOptions').hidden = this.nsType !== 'note';
+        $('#nsCreate').disabled = false;
+        $('#nsCreate').textContent = this.nsType === 'note' ? 'Create notebook' : 'Create';
+        return;
+      }
+      const opt = e.target.closest('.seg button');
+      if (opt) opt.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === opt));
+      if (e.target === dlg) dlg.close(); // tap outside the sheet
+    });
+    for (const id of ['#nsCancel', '#nsCancel2']) $(id).addEventListener('click', () => dlg.close());
     $('#nsCreate').addEventListener('click', async () => {
-      const layout = { size: $('#nsSize').value, orient: $('#nsOrient').value, paper: $('#nsPaper').value, scroll: $('#nsScroll').value };
-      $('#newSessionDlg').close();
+      const pick = (name) => dlg.querySelector(`.seg[data-name="${name}"] .on`)?.dataset.v;
+      dlg.close();
+      if (this.nsType !== 'note') return this.newSession();
+      const layout = { size: pick('size') || 'A4', orient: pick('orient') || 'portrait', paper: pick('paper') || 'ruled', scroll: pick('scroll') || 'vertical' };
       await this.newSession('', { layout });
       // the first page of a new notebook gets the notebook's paper
       if (this.board.pages[0]) { this.board.pages[0].paper = layout.paper; this.board.render(); }
@@ -518,7 +580,7 @@ export class Sessions {
         : [m.subject, ago(m.updated), fmt(m.cost || 0)].filter(Boolean).map(escapeHtml).join(' · ');
       const actions = this.filter === 'trash'
         ? `<button type="button" data-act="restore">Restore</button><button type="button" data-act="purge" class="danger">Delete for good</button>`
-        : `<button type="button" data-act="rename">Rename</button><button type="button" data-act="subject">Subject</button><button type="button" data-act="pin">${m.pinned ? 'Unpin' : 'Pin'}</button><button type="button" data-act="branch">Branch</button><button type="button" data-act="trash" class="danger">Delete</button>`;
+        : `<button type="button" data-act="rename">Rename</button><button type="button" data-act="subject">Subject</button><button type="button" data-act="pin">${m.pinned ? 'Unpin' : 'Pin'}</button><button type="button" data-act="setup">Page setup</button><button type="button" data-act="branch">Branch</button><button type="button" data-act="trash" class="danger">Delete</button>`;
       return `<div class="s-item${cur ? ' current' : ''}" data-id="${m.id}">
         <div class="s-row" data-open>
           <div class="s-thumb">${m.thumb ? `<img alt="" src="data:image/jpeg;base64,${m.thumb}">` : ''}</div>
@@ -558,6 +620,7 @@ export class Sessions {
       if (s !== null) await this.update(id, { subject: s.trim() });
     } else if (act === 'pin') await this.update(id, { pinned: !m.pinned });
     else if (act === 'branch') await this.branch(id);
+    else if (act === 'setup') { if (id !== this.currentId) await this.open(id); else this.closeDrawer(); this.openPageSetup(); }
     else if (act === 'trash') {
       if (confirm(`Move "${m.title}" to the trash? You can restore it for ${TRASH_DAYS} days.`)) await this.trash(id);
     } else if (act === 'restore') await this.restore(id);

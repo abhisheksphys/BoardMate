@@ -11,6 +11,55 @@ const mid = (a, b) => ({ sx: (a.sx + b.sx) / 2, sy: (a.sy + b.sy) / 2 });
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const normRect = (x0, y0, x1, y1) => ({ x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) });
 
+// Character height of some handwriting ≈ median stroke height, ignoring dots and long flat strokes (fraction
+// bars, underlines); handwritten letters average about 0.6 of the typeset font size. Returns a font size or null.
+function sizeOf(strokes) {
+  const hs = (strokes || [])
+    .map((s) => { const b = strokeBBox(s); const pad = s.width * 1.5; return { h: b.h - 2 * pad, w: b.w - 2 * pad }; })
+    .filter((d) => d.h >= 4 && !(d.w > 4 * d.h && d.h < 10))
+    .map((d) => d.h)
+    .sort((a, b) => a - b);
+  if (hs.length < 2) return null;
+  const lo = Math.floor(hs.length * 0.15), hi = Math.ceil(hs.length * 0.85);
+  const core = hs.slice(lo, Math.max(lo + 1, hi));
+  return Math.max(12, Math.min(96, core[Math.floor(core.length / 2)] / 0.6));
+}
+
+// How thick your ink actually is (median over strokes, with your typical pressure).
+function inkWidth(strokes) {
+  const ws = (strokes || []).slice(-60).map((s) => {
+    const ps = s.points || [];
+    const p = ps.length ? ps.reduce((a, q) => a + (q[2] ?? 0.5), 0) / ps.length : 0.5;
+    return s.width * (0.55 + 0.9 * p);
+  }).sort((a, b) => a - b);
+  return ws.length ? Math.round(ws[Math.floor(ws.length / 2)] * 10) / 10 : 0;
+}
+
+// The colour you write in most there (by amount of ink).
+function inkColor(strokes) {
+  const n = new Map();
+  for (const s of (strokes || []).slice(-80)) n.set(s.color, (n.get(s.color) || 0) + (s.points?.length || 1));
+  let best = null, bn = 0;
+  for (const [c, k] of n) if (k > bn) { best = c; bn = k; }
+  return best;
+}
+
+// Lasso selections carry their outline (path, world points) as well as their bounding box (x, y, w, h).
+export function inPolygon(pt, path) {
+  let inside = false;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    const [xi, yi] = path[i], [xj, yj] = path[j];
+    if (yi > pt.y !== yj > pt.y && pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+export const inSelection = (sel, pt) => !!sel && pt.x >= sel.x && pt.x <= sel.x + sel.w && pt.y >= sel.y && pt.y <= sel.y + sel.h && (!sel.path || inPolygon(pt, sel.path));
+function tracePath(ctx, path) {
+  ctx.beginPath();
+  path.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+}
+
 export function strokeBBox(s) {
   if (s._bb) return s._bb;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -127,6 +176,8 @@ export const PAGE_SIZES = { A4: [794, 1123], A5: [559, 794], Letter: [816, 1056]
 const PAGE_MARGIN = 16; // screen px around a page shown whole
 const PAGE_GAP = 28; // screen px between pages while flipping
 const PAGE_INSET = 24; // world px Claude's writing keeps from the page edge
+// Spring resistance past the last (or first) page: follows the finger less and less, never beyond `limit`.
+const spring = (d, limit) => Math.sign(d) * limit * (1 - Math.exp(-Math.abs(d) / limit));
 
 function drawMark(ctx, m, z) {
   const st = MARK_STYLE[m.kind] || MARK_STYLE.note;
@@ -184,7 +235,7 @@ export class Board {
   get page() { return this.pages[this.pi]; }
 
   newPage(name) {
-    const p = { id: uid(), name: name || `Page ${this.pages.length + 1}`, paper: this.layout?.paper || settings.paper, strokes: [], blocks: [], marks: [], notebook: [], view: { ox: 40, oy: 40, z: 1 } };
+    const p = { id: uid(), name: name || `Page ${this.pages.length + 1}`, paper: this.layout?.paper || this.sessionPaper || settings.paper, strokes: [], blocks: [], marks: [], notebook: [], view: { ox: 40, oy: 40, z: 1 } };
     this.pages.push(p);
     return p;
   }
@@ -471,6 +522,8 @@ export class Board {
         if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w };
         else this.drawing = { ...base, sel: { x0: w.x, y0: w.y } };
       }
+    } else if (this.tool === 'lasso') {
+      this.drawing = { ...base, lasso: [[w.x, w.y]] };
     }
     this.renderLive();
   }
@@ -529,6 +582,10 @@ export class Board {
         d.resize.h = (nw * d.from.h) / d.from.w;
       }
       else if (d.sel) { d.sel.x1 = w.x; d.sel.y1 = w.y; }
+      else if (d.lasso) {
+        const [lx, ly] = d.lasso[d.lasso.length - 1];
+        if (Math.hypot(w.x - lx, w.y - ly) > 3 / this.page.view.z) d.lasso.push([w.x, w.y]);
+      }
     }
     if (d.stroke) {
       // Predicted events: where the Pencil is about to be. Drawn ahead of the tip (never saved) to hide latency.
@@ -547,7 +604,12 @@ export class Board {
       this.gesture = null;
       if (this.touches.size) { if (g?.paging) this.slide = 0; this.startGesture(); }
       else {
-        if (g?.paging) {
+        if (g?.paging && this.pullAdd) {
+          // pulled far enough past the last page: a new page springs in
+          this.pullAdd = false;
+          this.newPage();
+          this.flipTo(1);
+        } else if (g?.paging) {
           // flip if dragged far enough (or flicked), otherwise settle back on this page
           const fast = Math.abs(this.slide) > 40 && performance.now() - g.t0 < 300;
           const far = Math.abs(this.slide) > this.pageStep() * 0.18;
@@ -594,6 +656,13 @@ export class Board {
       const s = d.sel;
       const big = s.x1 !== undefined && Math.hypot(s.x1 - s.x0, s.y1 - s.y0) > 8 / this.page.view.z;
       this.selection = big ? normRect(s.x0, s.y0, s.x1, s.y1) : null;
+      emit('selection', this.selection);
+    } else if (d.lasso) {
+      // close the loop; a tiny scribble clears the selection instead
+      const xs = d.lasso.map((p) => p[0]), ys = d.lasso.map((p) => p[1]);
+      const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+      const big = d.lasso.length >= 5 && Math.hypot(box.w, box.h) > 16 / this.page.view.z;
+      this.selection = big ? { ...box, path: d.lasso.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]) } : null;
       emit('selection', this.selection);
     }
     if (d.move || d.resize) this.render();
@@ -643,7 +712,13 @@ export class Board {
     if (g.kind === 'pan' && pts.length === 1 && g.paging) {
       // notebook, whole page in view: drag along the scroll direction to flip (with resistance at the ends)
       let d = this.vertical() ? pts[0].sy - g.p0.sy : pts[0].sx - g.p0.sx;
-      if ((d > 0 && this.pi === 0) || (d < 0 && this.pi === this.pages.length - 1)) d *= 0.3;
+      const step = this.pageStep();
+      this.pullAdd = false;
+      if (d < 0 && this.pi === this.pages.length - 1) {
+        // past the last page: pull against a spring; far enough and letting go adds a page
+        d = spring(d, step * 0.5);
+        this.pullAdd = Math.abs(d) > step * 0.2;
+      } else if (d > 0 && this.pi === 0) d = spring(d, step * 0.2);
       this.slide = d;
     } else if (g.kind === 'pan' && pts.length === 1) {
       v.ox = g.o0.x + pts[0].sx - g.p0.sx;
@@ -717,12 +792,28 @@ export class Board {
   // Looks, in order: inside your selection → your lines around/above that spot → your recent writing.
   // Returns { fontPx, source } or null if there's no handwriting to go by.
   writingSize(at, selection = null) {
+    const got = this.writingPool(at, selection);
+    if (!got) return null;
+    const fontPx = sizeOf(got.pool);
+    return fontPx ? { fontPx, source: got.source } : null;
+  }
+
+  // Your average writing size on this page (all of it), for "manual" sizes in units of your writing.
+  averageWritingSize() {
+    const own = sizeOf(this.page.strokes);
+    if (own) return own;
+    for (const p of this.pages) { const s = sizeOf(p.strokes); if (s) return s; } // a fresh page: your other pages
+    return null;
+  }
+
+  // The strokes Claude's writing should match: inside the selection, else the writing near the spot, else recent.
+  writingPool(at, selection = null) {
     const strokes = this.page.strokes;
     if (!strokes.length) return null;
     const center = (s) => { const b = strokeBBox(s); return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; };
     let pool = [], source = '';
     if (selection) {
-      pool = strokes.filter((s) => { const c = center(s); return c.x >= selection.x && c.x <= selection.x + selection.w && c.y >= selection.y && c.y <= selection.y + selection.h; });
+      pool = strokes.filter((s) => inSelection(selection, center(s)));
       source = 'selection';
     }
     if (pool.length < 3 && at) {
@@ -735,27 +826,28 @@ export class Board {
       if (near.length >= 3) { pool = near; source = 'nearby writing'; }
     }
     if (pool.length < 3) { pool = strokes.slice(-40); source = 'recent writing'; }
-    // character height ≈ median stroke height, ignoring dots and long flat strokes (fraction bars, underlines)
-    const hs = pool
-      .map((s) => { const b = strokeBBox(s); const pad = s.width * 1.5; return { h: b.h - 2 * pad, w: b.w - 2 * pad }; })
-      .filter((d) => d.h >= 4 && !(d.w > 4 * d.h && d.h < 10))
-      .map((d) => d.h)
-      .sort((a, b) => a - b);
-    if (hs.length < 2) return null;
-    const lo = Math.floor(hs.length * 0.15), hi = Math.ceil(hs.length * 0.85);
-    const core = hs.slice(lo, Math.max(lo + 1, hi));
-    const median = core[Math.floor(core.length / 2)];
-    // handwritten letters average about 0.6 of the typeset font size (between x-height and capital height)
-    const fontPx = Math.max(12, Math.min(96, median / 0.6));
-    return { fontPx, source };
+    return { pool, source };
   }
 
-  // Size for a new block of Claude's: matched to your handwriting unless turned off, times the user's scale.
-  aiFontSize(at, selection = null, extraScale = 1) {
-    const base = settings.aiMatchSize !== false ? this.writingSize(at, selection)?.fontPx || 22 : 22;
-    const scale = Math.max(0.3, Math.min(3, (Number(settings.aiSizeScale) || 1) * (Number(extraScale) || 1)));
-    return Math.round(Math.max(10, Math.min(140, base * scale)) * 10) / 10;
+  // How Claude's next block looks. Each of size, stroke width and colour is either "mimic" (taken from your
+  // writing where it goes) or "manual" (a set value). Size is always in units of your own writing.
+  aiStyle(at, selection = null, extraScale = 1) {
+    const s = settings;
+    const got = this.writingPool(at, selection);
+    const pool = got?.pool || [];
+    const avg = this.averageWritingSize() || 22;
+    const local = (got && sizeOf(pool)) || avg;
+    const factor = s.aiSizeMode === 'manual' ? Number(s.aiSizeManual) || 1 : Number(s.aiSizeScale) || 1;
+    const base = s.aiSizeMode === 'manual' ? avg : local;
+    const scale = Math.max(0.2, Math.min(4, factor * (Number(extraScale) || 1)));
+    const fontPx = Math.round(Math.max(10, Math.min(160, base * scale)) * 10) / 10;
+    // stroke: the line thickness wanted for the letters (same units as your pen width)
+    const strokePx = s.aiWeightMode === 'mimic' ? inkWidth(pool.length ? pool : this.page.strokes) : Math.max(0, Number(s.aiWeightManual) || 0);
+    const color = s.aiColorMode === 'mimic' ? inkColor(pool.length ? pool : this.page.strokes) || s.penColor : s.aiColor;
+    return { fontPx, strokePx, color };
   }
+
+  aiFontSize(at, selection = null, extraScale = 1) { return this.aiStyle(at, selection, extraScale).fontPx; }
 
   // Resize one of Claude's blocks (or an image) by a factor, with undo.
   async scaleBlock(id, factor) {
@@ -765,6 +857,7 @@ export class Board {
     if (b.kind === 'image') { b.w *= factor; b.h *= factor; }
     else {
       b.fontPx = Math.max(8, Math.min(160, (b.fontPx || 22) * factor));
+      if (b.strokePx) b.strokePx *= factor;
       this.layouts.delete(b.id);
       await this.layoutBlock(b);
     }
@@ -886,7 +979,7 @@ export class Board {
     for (const line of b.lines) {
       const L = lineToTex(line);
       let im = null;
-      if (!L.plain) im = await texToImage(L.tex, { color: b.color, display: L.display, fontPx });
+      if (!L.plain) im = await texToImage(L.tex, { color: b.color, display: L.display, fontPx, strokePx: b.strokePx || 0 });
       if (im?.error) im = null; // broken LaTeX: shown as text (never as a solid block)
       if (im) {
         items.push({ img: im.img, x: 0, y, w: im.w, h: im.h });
@@ -913,8 +1006,8 @@ export class Board {
     for (const b of this.page.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
   }
 
-  async addBlock({ lines = [], x, y, kind = 'math', src, w, h, fontPx = 22 }, { animateMs = 0, signal, author = 'ai' } = {}) {
-    const b = { id: uid(), kind, x, y, lines: [], color: settings.aiColor, fontPx, author, src, w, h };
+  async addBlock({ lines = [], x, y, kind = 'math', src, w, h, fontPx = 22, color, strokePx = 0 }, { animateMs = 0, signal, author = 'ai' } = {}) {
+    const b = { id: uid(), kind, x, y, lines: [], color: color || settings.aiColor, fontPx, strokePx, author, src, w, h };
     this.page.blocks.push(b);
     if (kind === 'math' && animateMs > 0 && lines.length > 1) {
       for (const ln of lines) {
@@ -1016,6 +1109,25 @@ export class Board {
     const ctx = cv.getContext('2d');
     const view = { z: scale, ox: -bb.x * scale, oy: -bb.y * scale };
     this.draw(ctx, view, 1, false);
+    const veil = (ctx) => {
+      // a lasso: what lies outside the outline is faded, so the picture shows what was circled
+      if (!region?.path) return;
+      ctx.save();
+      ctx.setTransform(scale, 0, 0, scale, view.ox, view.oy);
+      ctx.beginPath();
+      ctx.rect(bb.x, bb.y, bb.w, bb.h);
+      region.path.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fill('evenodd');
+      ctx.setLineDash([6 / scale, 5 / scale]);
+      ctx.lineWidth = 1.5 / scale;
+      ctx.strokeStyle = '#1a5fd0';
+      tracePath(ctx, region.path);
+      ctx.stroke();
+      ctx.restore();
+    };
+    veil(ctx);
     let data;
     try {
       data = cv.toDataURL('image/jpeg', 0.85);
@@ -1026,6 +1138,7 @@ export class Board {
       cv2.width = W;
       cv2.height = H;
       this.draw(cv2.getContext('2d'), view, 1, false);
+      veil(cv2.getContext('2d'));
       this.noImageBlocks = false;
       data = cv2.toDataURL('image/jpeg', 0.85);
     }
@@ -1150,6 +1263,32 @@ export class Board {
         this.pi = keep;
       }
     }
+    // pulling past the last page: the outline of a page that is about to be added
+    if (this.slide < 0 && keep === this.pages.length - 1) {
+      const off = this.slide + step;
+      const x = v.ox + (this.vertical() ? 0 : off), y = v.oy + (this.vertical() ? off : 0);
+      const w = s.w * v.z, h = s.h * v.z, d = this.dpr;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = Math.min(1, Math.abs(this.slide) / (step * 0.2));
+      ctx.setLineDash([8 * d, 6 * d]);
+      ctx.lineWidth = 2 * d;
+      ctx.strokeStyle = this.pullAdd ? '#1a5fd0' : '#9aa0aa';
+      ctx.fillStyle = this.pullAdd ? 'rgba(26,95,208,0.06)' : 'rgba(255,255,255,0.45)';
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(x * d, y * d, w * d, h * d, 6 * d) : ctx.rect(x * d, y * d, w * d, h * d);
+      ctx.fill();
+      ctx.stroke();
+      // the label sits in the visible strip of the new page
+      const vis = this.vertical() ? { cx: x + w / 2, cy: Math.max(y, 0) + Math.min(this.h - Math.max(y, 0), 120) / 2 } : { cx: Math.max(x, 0) + Math.min(this.w - Math.max(x, 0), 220) / 2, cy: y + h / 2 };
+      ctx.setLineDash([]);
+      ctx.fillStyle = this.pullAdd ? '#1a5fd0' : '#6b6b70';
+      ctx.font = `600 ${15 * d}px -apple-system, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.pullAdd ? '＋  Release to add a page' : '＋  Pull to add a page', vis.cx * d, vis.cy * d);
+      ctx.restore();
+    }
   }
 
   // Snapshot for Claude (no grid, no marks).
@@ -1197,7 +1336,20 @@ export class Board {
       ctx.stroke();
       ctx.restore();
     }
-    const sel = this.drawing?.sel?.x1 !== undefined ? normRect(this.drawing.sel.x0, this.drawing.sel.y0, this.drawing.sel.x1, this.drawing.sel.y1) : this.selection;
+    const lassoNow = this.drawing?.lasso;
+    const lassoSel = !lassoNow && !this.drawing?.sel && this.selection?.path;
+    if (lassoNow || lassoSel) {
+      ctx.save();
+      ctx.setLineDash([6 / view.z, 5 / view.z]);
+      ctx.lineWidth = 1.5 / view.z;
+      ctx.strokeStyle = '#1a5fd0';
+      ctx.fillStyle = 'rgba(26,95,208,0.07)';
+      tracePath(ctx, lassoNow || this.selection.path);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    const sel = this.drawing?.sel?.x1 !== undefined ? normRect(this.drawing.sel.x0, this.drawing.sel.y0, this.drawing.sel.x1, this.drawing.sel.y1) : lassoNow || lassoSel ? null : this.selection;
     if (sel) {
       ctx.save();
       ctx.setLineDash([6 / view.z, 5 / view.z]);
@@ -1281,6 +1433,8 @@ export class Board {
         ctx.font = `${it.fontPx}px ${FONT}`;
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, b.x + it.x, b.y + it.y + it.fontPx * 0.1);
+        const extra = (b.strokePx || 0) - it.fontPx * 0.075; // thicker than the font's own lines: outline the letters too
+        if (extra > 0.2) { ctx.strokeStyle = b.color; ctx.lineWidth = extra; ctx.lineJoin = 'round'; ctx.strokeText(it.text, b.x + it.x, b.y + it.y + it.fontPx * 0.1); }
       }
     }
   }

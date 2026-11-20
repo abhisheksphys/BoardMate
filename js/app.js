@@ -55,12 +55,13 @@ $('#exportBtn')?.addEventListener('click', () => {
 $('#exportPdf')?.addEventListener('click', () => { $('#exportDlg').close(); exporter.pdf(); });
 $('#exportTex')?.addEventListener('click', () => { $('#exportDlg').close(); exporter.latex(); });
 $('#exportCancel')?.addEventListener('click', () => $('#exportDlg').close());
+$('#exportDlg')?.addEventListener('click', (e) => { if (e.target === $('#exportDlg')) $('#exportDlg').close(); });
 
 // ---------- toolbar ----------
 function selectTool(name) {
   board.tool = name;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === name));
-  if (name !== 'select' && board.selection) { board.selection = null; board.render(); }
+  if (name !== 'select' && name !== 'lasso' && board.selection) { board.selection = null; board.render(); }
   if (name !== 'eraser') board.eraserCursor = null;
   if (name !== 'select') board.activeBlock = null;
   board.renderLive();
@@ -121,6 +122,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'p') $('[data-tool="pen"]').click();
   else if (e.key === 'e') $('[data-tool="eraser"]').click();
   else if (e.key === 's') $('[data-tool="select"]').click();
+  else if (e.key === 'l') $('[data-tool="lasso"]').click();
 });
 
 // ---------- mic ----------

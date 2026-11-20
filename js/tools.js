@@ -196,7 +196,8 @@ export async function runTool(use, ctx) {
         const anchor = inp.anchor || (Number.isFinite(inp.x) && Number.isFinite(inp.y) ? 'at_xy' : 'below_content');
         // Size: matched to the handwriting it continues (selection → nearby lines → recent writing).
         const sizeRef = anchor === 'at_xy' && snap && Number.isFinite(inp.x) ? board.imageToWorld(snap, inp.x, inp.y) : sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null;
-        const fontPx = board.aiFontSize(sizeRef, sel, inp.size_scale);
+        const style = board.aiStyle(sizeRef, sel, inp.size_scale);
+        const fontPx = style.fontPx;
         const gap = fontPx * 1.1;
         if (anchor === 'at_xy' && snap && Number.isFinite(inp.x) && Number.isFinite(inp.y)) pos = board.imageToWorld(snap, inp.x, inp.y);
         else if (anchor === 'below_selection' && sel) pos = { x: sel.x, y: sel.y + sel.h + gap };
@@ -210,7 +211,7 @@ export async function runTool(use, ctx) {
         board.setLocked(true);
         let moved = null;
         try {
-          const blk = await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
+          const blk = await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx, color: style.color, strokePx: style.strokePx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
           moved = await board.keepOnPage(blk); // notebook: stay on the page, or continue on the next one
         } finally {
           board.setLocked(false);
