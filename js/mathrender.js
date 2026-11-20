@@ -19,6 +19,19 @@ export function mathReady(timeoutMs = 8000) {
 
 const textTex = (t) => `\\text{${t.replace(/[{}]/g, (c) => (c === '{' ? '｛' : '｝'))}}`;
 
+// Checks every board line before anything is written. Returns [] when all render, else
+// [{ line, error }] (an empty list too when MathJax is unavailable: lines then fall back to text anyway).
+export async function texErrors(lines) {
+  const out = [];
+  for (const line of lines) {
+    const L = lineToTex(line);
+    if (L.plain) continue;
+    const im = await texToImage(L.tex, { display: L.display });
+    if (im?.error) out.push({ line: String(line), error: im.error });
+  }
+  return out;
+}
+
 // One board line -> { plain, text } or { tex, display }.
 // "$$...$$" or "\[...\]" = display math; other lines are text with optional inline $...$.
 export function lineToTex(line) {
@@ -49,6 +62,11 @@ export function texToImage(tex, { color = '#000', display = true, fontPx = 22 } 
     }
     const svg = node.querySelector('svg');
     if (!svg) return null;
+    // A LaTeX mistake makes MathJax draw an error box whose yellow/red colours come from a page stylesheet.
+    // In a standalone image that stylesheet is missing, so the box became a solid bar of ink colour that
+    // hid the message. Report the error instead, so the line can be shown as text and Claude can fix it.
+    const err = svg.querySelector('[data-mml-node="merror"]');
+    if (err) return { error: err.getAttribute('data-mjx-error') || err.getAttribute('title') || err.textContent || 'LaTeX error' };
     const exPx = fontPx * 0.44;
     const w = Math.max(1, parseFloat(svg.getAttribute('width')) * exPx);
     const h = Math.max(1, parseFloat(svg.getAttribute('height')) * exPx);

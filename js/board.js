@@ -743,6 +743,7 @@ export class Board {
       const L = lineToTex(line);
       let im = null;
       if (!L.plain) im = await texToImage(L.tex, { color: b.color, display: L.display, fontPx });
+      if (im?.error) im = null; // broken LaTeX: shown as text (never as a solid block)
       if (im) {
         items.push({ img: im.img, x: 0, y, w: im.w, h: im.h });
         y += im.h + gap;

@@ -4,6 +4,7 @@ import { runSympy } from './cas.js';
 import { searchLibrary, renderPage, listBooks } from './library.js';
 import { imageBlock } from './claude.js';
 import { emit } from './bus.js';
+import { texErrors } from './mathrender.js';
 
 export const TOOL_SCHEMAS = [
   {
@@ -186,6 +187,11 @@ export async function runTool(use, ctx) {
         else if (anchor === 'below_selection' && sel) pos = { x: sel.x, y: sel.y + sel.h + gap };
         else if (anchor === 'right_of_selection' && sel) pos = { x: sel.x + sel.w + gap * 1.5, y: sel.y };
         else pos = cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
+        // Check the LaTeX first: a broken line is reported back for fixing instead of being written.
+        const bad = await texErrors(lines);
+        if (bad.length) {
+          return fail(use.id, `Nothing was written: ${bad.length} line(s) have LaTeX errors. ${bad.map((b) => `"${b.line}" → ${b.error}`).join('; ')}. Fix the LaTeX (standard MathJax commands only; math inside $...$ or a whole line in $$...$$) and call write_on_canvas again.`);
+        }
         board.setLocked(true);
         try {
           await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
