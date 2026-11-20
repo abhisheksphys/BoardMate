@@ -32,7 +32,8 @@ export const DEFAULTS = {
   headphones: false, // true = keep listening while AI speaks (enables barge-in)
   voiceSend: 'auto', // auto = send after a pause | manual = wait for the ↑ button in the speech bar
   voiceSendDelaySec: 1.4, // auto mode: seconds of silence before sending
-  voiceWatchdogSec: 8, // refresh a silent listening run after this many seconds (Safari sometimes stops hearing)
+  voiceFreshRuns: false, // true = restart listening after every sent message (older behaviour)
+  voiceWatchdogSec: 0, // >0: refresh a listening run that has heard nothing for this many seconds (0 = off)
   voiceDebug: false, // show what speech recognition is doing in the panel status line
   voiceOut: true,
   voiceName: '',
@@ -78,7 +79,7 @@ export const DEFAULTS = {
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'liveSpeak',
-  'voiceIn', 'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
+  'voiceIn', 'voiceSend', 'voiceSendDelaySec', 'voiceFreshRuns', 'voiceWatchdogSec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];

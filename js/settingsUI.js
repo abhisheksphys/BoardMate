@@ -30,6 +30,8 @@ const SECTIONS = [
     { k: 'voiceOut', label: 'Spoken replies', type: 'checkbox' },
     { k: 'narration', label: 'Narrate actions ("done, it is on the board")', type: 'checkbox' },
     { k: 'voiceName', label: 'Voice', type: 'voice' },
+    { k: 'voiceFreshRuns', label: 'Restart listening after every sent message (try this if words from earlier messages get repeated)', type: 'checkbox' },
+    { k: 'voiceWatchdogSec', label: 'Refresh listening after this many silent seconds (0 = off; try 8 if the mic sometimes stops hearing)', type: 'number', step: 1 },
     { k: 'voiceDebug', label: 'Show voice diagnostics (what Safari hears, step by step) — for troubleshooting', type: 'checkbox' },
     { k: 'speechRate', label: 'Speech rate', type: 'number', step: 0.05 },
   ]],
@@ -110,6 +112,11 @@ export class SettingsUI {
         <div class="scroll">
           ${intro}
           ${SECTIONS.map(([title, fields]) => `<fieldset><legend>${escapeHtml(title)}</legend>${fields.map(fieldHtml).join('')}</fieldset>`).join('')}
+          <fieldset><legend>Voice troubleshooting</legend>
+            <div class="muted">If listening stops working: reproduce it, then copy the voice log and paste it to Claude in your chat. It records what Safari's speech recognition did, step by step (no audio).</div>
+            <div class="buttons"><button type="button" id="copyVoiceLog">Copy voice log</button><button type="button" id="clearVoiceLog" class="ghost">Clear log</button></div>
+            <div id="voiceLogMsg" class="muted small"></div>
+          </fieldset>
           <fieldset><legend>Saved action buttons</legend><div id="savedList"></div></fieldset>
           <fieldset><legend>Shared library (PDFs every session can use)</legend><div class="muted">PDFs for just one session go in that session's 📎 materials, in the Claude panel.</div>
             <div id="bookList" class="list"></div>
@@ -178,6 +185,20 @@ export class SettingsUI {
         this.renderBooks();
       }
     });
+    d.querySelector('#copyVoiceLog').addEventListener('click', async () => {
+      const text = this.voice.report();
+      const msg = d.querySelector('#voiceLogMsg');
+      try { await navigator.clipboard.writeText(text); msg.textContent = `Copied (${(this.voice.events || []).length} events). Paste it into your chat with Claude.`; }
+      catch {
+        // clipboard blocked: show it so it can be selected and copied by hand
+        msg.innerHTML = '';
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.rows = 8; ta.style.width = '100%';
+        msg.append('Copying was blocked. Select all of this and copy it:', ta);
+        ta.focus(); ta.select();
+      }
+    });
+    d.querySelector('#clearVoiceLog').addEventListener('click', () => { this.voice.clearLog(); d.querySelector('#voiceLogMsg').textContent = 'Log cleared. Now reproduce the problem, then copy the log.'; });
     d.querySelector('#pdfInput').addEventListener('change', async (e) => {
       const prog = d.querySelector('#pdfProgress');
       for (const file of e.target.files) {
