@@ -20,6 +20,7 @@ const SECTIONS = [
     { k: 'quietIdleSec', label: 'Quiet live: look after you pause for (seconds)', type: 'number' },
     { k: 'watchMaxWaitSec', label: 'While writing non-stop, look at least every (seconds)', type: 'number' },
     { k: 'escalate', label: 'Double-check suspected errors with the strong model', type: 'checkbox' },
+    { k: 'boardRequests', label: 'Do what I write to Claude on the board (Live and Quiet live; e.g. "Write down the Lagrangian of the Standard Model")', type: 'checkbox' },
     { k: 'liveSpeak', label: 'Speak live comments aloud', type: 'checkbox' },
     { k: 'showMarks', label: 'Show margin marks', type: 'checkbox' },
   ]],

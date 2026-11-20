@@ -13,12 +13,14 @@ const WATCH_SYSTEM = `You silently watch a scientist's handwritten whiteboard pa
  "notebook_remove":[],
  "issues":[{"x":0,"y":0,"kind":"error|warn|ok","note":"one short sentence"}],
  "comment":null,
- "spoken":null}
+ "spoken":null,
+ "board_requests":[{"text":"...","x0":0,"y0":0,"x1":0,"y1":0}]}
 Rules:
 - notebook_upsert: equations or expressions visible in the image that are new or changed. Reuse an existing key when it is the same equation. x,y = left end of the equation in pixels of THIS image. notebook_remove: keys of notes whose equation was erased in this region.
 - QUIET mode: issues [] and comment null.
 - LIVE mode: check the newest work against the earlier lines and your notes. Flag real mistakes (algebra, signs, indices, factors, dimensions, misapplied identities) as "error", doubtful steps as "warn". Use "ok" sparingly. Put each mark just right of its line (pixels in this image).
 - comment: one or two sentences only when worth saying now; otherwise null. spoken: the same for speech, math in words, or null.
+- board_requests (both modes): an instruction or question the user has handwritten FOR THE ASSISTANT in the new writing, e.g. "Write down the Lagrangian of the Standard Model", "derive this", "what comes next?", "Claude: check line 3". text = the words as written (fix obvious spelling); x0,y0,x1,y1 = the box around those words in pixels of THIS image. Only when the sentence looks finished. Not requests: titles, headings, notes to self, and problem statements the user is solving on the page themselves (e.g. "Q2. Show that ..." followed by their own working). Usually [].
 - Never comment on neatness. Blue typeset blocks were written by the assistant. Be brief.`;
 
 const VERIFY_SYSTEM = `You double-check suspected mistakes on a scientist's handwritten page. Given the image, the notes about the rest of the page, and the suspected issues, keep only real issues (fix their notes if needed). Reply with ONE JSON object:
@@ -107,6 +109,8 @@ export class Perception {
       }
       b.saveSoon();
 
+      for (const r of Array.isArray(j.board_requests) ? j.board_requests : []) this.takeRequest(r, crop, region);
+
       if (!live) return;
       let issues = Array.isArray(j.issues) ? j.issues : [];
       let comment = j.comment || null;
@@ -136,6 +140,35 @@ export class Perception {
       this.running = false;
       if (this.pending) this.schedule();
     }
+  }
+
+  // A request handwritten on the board: run it like a typed question, pointing at the handwriting
+  // (as a selection), once. Requests already handled on this page are remembered so they never repeat.
+  takeRequest(r, crop, region) {
+    if (!settings.boardRequests || !r || !String(r.text || '').trim()) return;
+    const b = this.board;
+    const text = String(r.text).trim();
+    let rect;
+    if ([r.x0, r.y0, r.x1, r.y1].every(Number.isFinite)) {
+      const a = b.imageToWorld(crop, Math.min(r.x0, r.x1), Math.min(r.y0, r.y1));
+      const c = b.imageToWorld(crop, Math.max(r.x0, r.x1), Math.max(r.y0, r.y1));
+      rect = { x: a.x - 10, y: a.y - 10, w: c.x - a.x + 20, h: c.y - a.y + 20 };
+    } else rect = { ...region };
+    const handled = (b.page.handledRequests ||= []);
+    const words = (t) => new Set(String(t).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean));
+    const similar = (t1, t2) => { const A = words(t1), B = words(t2); let n = 0; for (const w of A) if (B.has(w)) n++; return n >= 0.6 * Math.min(A.size, B.size); };
+    const overlaps = (p, q) => p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h;
+    if (handled.some((h) => overlaps(h, rect) && similar(h.text, text))) return;
+    handled.push({ text, ...rect });
+    if (handled.length > 100) handled.splice(0, handled.length - 100);
+    b.saveSoon();
+    this.panel.add('user', `✍ From the board: ${text}`);
+    this.agent.ask(
+      `I wrote this request on the board (it is inside the selection rectangle): "${text}". Do what it asks. ` +
+        'If the result is something to write (equations, a derivation, a list), write it on the board with write_on_canvas ' +
+        'using anchor "below_selection", and keep your panel reply to one short line. Otherwise answer in the panel.',
+      { selection: rect, origin: 'board request' },
+    );
   }
 
   async verify(crop, issues) {

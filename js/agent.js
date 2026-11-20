@@ -151,6 +151,7 @@ export class Agent {
     }
     this.busy = true;
     this.spokeThisTurn = false;
+    this.turnSelection = opts.selection || null; // where this question points (a board request uses its own)
     this.abort = new AbortController();
 
     // Fresh conversation after a long break (its cache has expired anyway); trim history in chunks.
@@ -225,6 +226,7 @@ export class Agent {
       if (i >= 0) this.exchanges[i] = compactExchange(ex);
       if (lastEl && cost) this.panel.footer(lastEl, `${fmt(cost)} · ${[...tiersUsed].map((t) => TIER_NAMES[t]).join(' → ')}`);
       this.busy = false;
+      this.turnSelection = null;
       this.board.setLocked(false);
       this.panel.status('');
       const next = this.queue.shift();

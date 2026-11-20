@@ -174,7 +174,7 @@ export async function runTool(use, ctx) {
         if (!settings.allowBoardWrite) return fail(use.id, 'Writing on the board is turned off in settings. Put the content in your text reply instead.');
         const lines = (inp.lines || []).map(String).filter((l) => l.trim());
         if (!lines.length) return fail(use.id, 'No lines given.');
-        const sel = board.selection;
+        const sel = agent.turnSelection || board.selection;
         const cb = board.contentBounds();
         const vis = board.visibleWorld();
         let pos;
