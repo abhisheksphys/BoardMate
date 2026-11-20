@@ -4,6 +4,11 @@ import { emit } from './bus.js';
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// On iPad and iPhone, Safari only gives a listening run real microphone audio when a tap started it.
+// Runs the app starts by itself report "started" but hear nothing (voice log, Nov 2026: none of 29 such
+// runs heard a word). So there the app never restarts listening on its own; it says so and you tap the mic.
+const TAP_ONLY = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
+
 class Voice {
   constructor() {
     this.supported = !!SR;
@@ -12,7 +17,6 @@ class Voice {
     this.heard = ''; // text from earlier recognition runs that hasn't been sent yet
     this.runText = ''; // what the current run has recognised and not yet sent
     this.runSent = ''; // what the current run recognised that was already sent
-    this.pausedForSpeech = false;
     this.lastSent = '';
     this.lastSentAt = 0;
     this.retries = 0;
@@ -27,13 +31,10 @@ class Voice {
     if (!this.want || !this.supported) return;
     const now = Date.now();
     if (this.mutedSpeech) this.isMuted(); // notices speech output that ended without telling us
-    if (!this.listening) {
-      if (now - this.lastStartAttempt > 2500) { this.debug('mic was meant to be on but was not listening: restarting'); this.startRec('watchdog: not listening'); }
-      return;
+    if (!this.listening && now - this.lastStartAttempt > 2500) {
+      if (TAP_ONLY) this.stoppedOnItsOwn('not listening');
+      else { this.debug('mic was meant to be on but was not listening: restarting'); this.startRec('watchdog: not listening'); }
     }
-    // listening, nothing waiting, and no sign of life for a while: the run may be dead, start a fresh one
-    const sec = Number(settings.voiceWatchdogSec) || 0;
-    if (sec > 0 && !this.runText && now - this.lastActivity > Math.max(4, sec) * 1000) { this.debug('no sound for a while: refreshing the listening run'); this.freshRun('watchdog: no sound'); }
   }
 
   // Voice log: every recogniser event and every app action, with times, so problems on a real iPad can be
@@ -57,7 +58,7 @@ class Voice {
   }
 
   report() {
-    const keys = ['voiceSend', 'voiceSendDelaySec', 'voiceFreshRuns', 'voiceWatchdogSec', 'headphones', 'voiceOut', 'narration', 'liveSpeak', 'wakeWord'];
+    const keys = ['voiceSend', 'voiceSendDelaySec', 'headphones', 'voiceOut', 'narration', 'liveSpeak', 'wakeWord'];
     const conf = keys.map((k) => `${k}=${JSON.stringify(settings[k])}`).join(' ');
     return [
       'Live Board voice log',
@@ -154,10 +155,7 @@ class Voice {
       const text = this.lastResults.map((x) => x.t).join(' ').replace(/\s+/g, ' ').trim();
       this.debug('heard: ' + text);
       let fresh;
-      if (settings.voiceFreshRuns) {
-        // fresh-run mode: the run only contains this message (plus late re-deliveries, stripped below)
-        fresh = Voice.strip(text, this.runSent);
-      } else {
+      {
         // one continuous run: skip the finished phrases already sent (Safari numbers them), then any
         // still-changing words that were sent with them (compared loosely, since Safari rewrites)
         const sk = this.skip || { idx: 0, tail: '', all: '' };
@@ -202,13 +200,17 @@ class Voice {
       this.skip = null;
       this.lastResults = [];
       emit('mic', this.state());
-      if (this.want && !this.pausedForSpeech) setTimeout(() => this.startRec('run ended by Safari'), 250);
+      if (!this.want) return;
+      if (TAP_ONLY) this.stoppedOnItsOwn('Safari ended the listening run');
+      else setTimeout(() => this.startRec('run ended by Safari'), 250);
     };
     r.onerror = (e) => {
       if (!mine()) return;
       this.debug('error: ' + e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         this.want = false;
+        this.listening = false; this.ready = false; this.rec = null; emit('mic', this.state());
+        if (document.visibilityState !== 'visible') return; // the app was in the background: not a permission problem
         emit('voice-error', 'Safari is not allowing speech recognition. Allow the microphone (aA button in the address bar → Website Settings), and make sure Dictation is on (iPad Settings → General → Keyboard).');
       } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
         emit('voice-error', 'Speech recognition: ' + e.error);
@@ -256,7 +258,11 @@ class Voice {
 
   toggleContinuous() {
     this.want = !this.want;
-    if (this.want) this.startRec('mic tapped on');
+    if (this.want) {
+      if (this.listening) { const old = this.rec; this.rec = null; this.listening = false; try { old?.abort(); } catch {} }
+      this.stopNoticeShown = false;
+      this.startRec('mic tapped on');
+    }
     else {
       // turning the mic off: auto mode sends what's left; manual mode keeps it in the bar for you to send
       if (settings.voiceSend === 'manual') { this.heard = this.current(); this.runSent = `${this.runSent} ${this.runText}`.trim(); this.runText = ''; this.showHeld(); }
@@ -274,7 +280,6 @@ class Voice {
 
   // After sending (or discarding) words: either start a fresh run, or keep the run and mark what was used.
   consumed(reason) {
-    if (settings.voiceFreshRuns) return this.freshRun(reason);
     const res = this.lastResults || [];
     let idx = 0;
     while (idx < res.length && res[idx].final) idx++;
@@ -282,18 +287,18 @@ class Voice {
     this.log('app: marked as used', `reason=${reason} skip ${idx} finished phrase(s) + "${this.skip.tail.slice(0, 40)}"`);
   }
 
-  // Ends the current listening run and starts a new one with an empty transcript.
-  freshRun(reason = 'unspecified') {
-    if (!this.listening || !this.want) return;
-    if (this.runText) { this.heard = this.current(); this.runText = ''; } // keep anything not yet sent
-    const old = this.rec;
-    this.rec = null;
+  // Listening stopped without you tapping (Safari ended it, or the app went to the background).
+  // On iPad a restart without a tap would be deaf, so show the mic as off and say so.
+  stoppedOnItsOwn(why) {
+    if (this.runText) { this.heard = this.current(); this.runText = ''; this.showHeld(); } // keep unsent words
+    this.want = false;
     this.listening = false;
     this.ready = false;
-    this.log('app: abort run', `reason=${reason}`);
-    try { old?.abort(); } catch {}
-    this.debug('starting a fresh listening run');
-    setTimeout(() => { if (this.want && !this.listening && !this.pausedForSpeech) this.startRec('fresh run after ' + reason); }, 300);
+    try { this.rec?.abort(); } catch {}
+    this.rec = null;
+    this.log('app: listening stopped on its own', why);
+    emit('mic', this.state());
+    if (!this.stopNoticeShown) { this.stopNoticeShown = true; emit('voice-notice', 'Listening stopped. Tap the mic to listen again.'); }
   }
 
   showHeld() {
@@ -369,21 +374,33 @@ class Voice {
     return 'speechSynthesis' in window ? speechSynthesis.getVoices() : [];
   }
 
-  speak(text) {
-    if (!('speechSynthesis' in window) || !text) return;
+  speak(text, why = 'reply') {
+    if (!('speechSynthesis' in window)) { this.log('app: cannot speak', 'this browser has no speech output'); return; }
+    if (!text) return;
     const u = new SpeechSynthesisUtterance(String(text).replace(/[$\\{}_^]/g, ' '));
     u.rate = settings.speechRate || 1;
-    const v = this.voices().find((x) => x.name === settings.voiceName);
+    u.volume = 1;
+    const all = this.voices();
+    const v = all.find((x) => x.name === settings.voiceName);
     if (v) u.voice = v;
     u.lang = v?.lang || navigator.language || 'en-US';
+    // iOS sometimes leaves speech output paused, and then nothing is ever heard
+    if (speechSynthesis.paused) { this.log('app: speech output was paused: resuming'); speechSynthesis.resume(); }
+    const asked = Date.now();
+    this.log('app: speak', `${why}, ${String(text).length} chars, voice=${v ? `${v.name} (${v.lang}${v.localService === false ? ', online' : ''})` : `default for ${u.lang}`}${settings.voiceName && !v ? ` [chosen voice "${settings.voiceName}" not available]` : ''}, ${all.length} voices, rate ${u.rate}, mic ${this.listening ? 'on' : 'off'}, unlocked=${!!this.unlocked}`);
+    let started = false;
+    setTimeout(() => { if (!started) this.log('app: speech output never started', `${((Date.now() - asked) / 1000).toFixed(1)} s after asking; still queued=${speechSynthesis.pending} speaking=${speechSynthesis.speaking}`); }, 3000);
     u.onstart = () => {
+      started = true;
       // Listening keeps running (stopping and restarting it is what leaves iPad Safari deaf).
       // Instead, whatever the mic picks up while Claude talks is ignored: it is mostly Claude's own voice.
       this.mutedSpeech = true;
       this.log('app: Claude speaking (listening continues, words ignored)', `"${String(text).slice(0, 40)}"`);
       emit('speaking', true);
     };
-    const done = () => {
+    const done = (e) => {
+      if (e?.type === 'error') this.log('ERROR speech output', `${e.error || 'unknown'} after ${((Date.now() - asked) / 1000).toFixed(1)} s`);
+      else this.log('app: speech output ended', `after ${((Date.now() - asked) / 1000).toFixed(1)} s (about ${Math.round(String(text).length / 14)} s expected)`);
       setTimeout(() => {
         if (speechSynthesis.speaking) return;
         emit('speaking', false);
@@ -394,6 +411,13 @@ class Voice {
     u.onend = done;
     u.onerror = done;
     speechSynthesis.speak(u);
+  }
+
+  // Settings → Voice → Test voice. Runs from a tap, which is what iOS needs to allow speech output.
+  testVoice() {
+    this.unlocked = true;
+    speechSynthesis.cancel?.();
+    this.speak('This is Live Board. If you can hear me, speech output works.', 'test button');
   }
 
   isSpeaking() {
@@ -433,8 +457,7 @@ class Voice {
     this.muteUntil = Date.now() + tailMs;
     clearTimeout(this.muteTimer);
     const markUsed = () => {
-      if (this.listening && !settings.voiceFreshRuns) this.consumed('Claude finished speaking');
-      else if (this.listening) this.freshRun('Claude finished speaking');
+      if (this.listening) this.consumed('Claude finished speaking');
       this.runText = ''; this.lastShown = '';
     };
     if (tailMs > 0) this.muteTimer = setTimeout(markUsed, tailMs);
@@ -445,5 +468,17 @@ class Voice {
 export const voice = new Voice();
 
 // Page visibility changes affect Safari's recogniser, so they go in the voice log too.
-document.addEventListener('visibilitychange', () => voice.log('page ' + document.visibilityState));
+// Safari stops listening when the app goes to the background (and can't restart it there), so the mic is
+// switched off cleanly and you tap it again when you are back.
+document.addEventListener('visibilitychange', () => {
+  voice.log('page ' + document.visibilityState);
+  if (document.visibilityState === 'hidden' && voice.want) {
+    voice.stopNoticeShown = true; // one clear message when you come back, not now
+    voice.stoppedOnItsOwn('app went to the background');
+    voice.backgrounded = true;
+  } else if (document.visibilityState === 'visible' && voice.backgrounded) {
+    voice.backgrounded = false;
+    emit('voice-notice', 'The mic switched off while the app was in the background. Tap it to listen again.');
+  }
+});
 window.addEventListener('pagehide', () => voice.log('page hide'));

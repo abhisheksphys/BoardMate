@@ -31,8 +31,6 @@ const SECTIONS = [
     { k: 'voiceOut', label: 'Spoken replies', type: 'checkbox' },
     { k: 'narration', label: 'Narrate actions ("done, it is on the board")', type: 'checkbox' },
     { k: 'voiceName', label: 'Voice', type: 'voice' },
-    { k: 'voiceFreshRuns', label: 'Restart listening after every sent message (try this if words from earlier messages get repeated)', type: 'checkbox' },
-    { k: 'voiceWatchdogSec', label: 'Refresh listening after this many silent seconds (0 = off; try 8 if the mic sometimes stops hearing)', type: 'number', step: 1 },
     { k: 'voiceDebug', label: 'Show voice diagnostics (what Safari hears, step by step) — for troubleshooting', type: 'checkbox' },
     { k: 'speechRate', label: 'Speech rate', type: 'number', step: 0.05 },
   ]],
@@ -125,7 +123,7 @@ export class SettingsUI {
           ${SECTIONS.map(([title, fields]) => `<fieldset><legend>${escapeHtml(title)}</legend>${fields.map(fieldHtml).join('')}</fieldset>`).join('')}
           <fieldset><legend>Voice troubleshooting</legend>
             <div class="muted">If listening stops working: reproduce it, then copy the voice log and paste it to Claude in your chat. It records what Safari's speech recognition did, step by step (no audio).</div>
-            <div class="buttons"><button type="button" id="copyVoiceLog">Copy voice log</button><button type="button" id="clearVoiceLog" class="ghost">Clear log</button></div>
+            <div class="buttons"><button type="button" id="testVoice">Test voice</button><button type="button" id="copyVoiceLog">Copy voice log</button><button type="button" id="clearVoiceLog" class="ghost">Clear log</button></div>
             <div id="voiceLogMsg" class="muted small"></div>
           </fieldset>
           <fieldset><legend>Saved action buttons</legend><div id="savedList"></div></fieldset>
@@ -207,6 +205,10 @@ export class SettingsUI {
         await removeBook(b.dataset.delBook);
         this.renderBooks();
       }
+    });
+    d.querySelector('#testVoice').addEventListener('click', () => {
+      this.voice.testVoice();
+      document.getElementById('voiceLogMsg').textContent = 'Speaking a test sentence… If you hear nothing, check the iPad volume and Silent mode, then copy the voice log.';
     });
     d.querySelector('#copyVoiceLog').addEventListener('click', async () => {
       const text = this.voice.report();

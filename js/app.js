@@ -142,6 +142,7 @@ $('#interimEdit').addEventListener('click', () => {
   input.focus();
 });
 on('voice-error', (m) => panel.add('error', m));
+on('voice-notice', (m) => panel.add('info', `🎙 ${m}`));
 // Visible proof that the mic is actually listening, and optional step-by-step diagnostics.
 on('mic', (st) => {
   if (agent.busy) return;
