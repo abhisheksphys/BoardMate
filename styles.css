@@ -539,3 +539,10 @@ dialog.pages-sheet[open] { display: flex; }
 #awarenessBtn .deep-ring { opacity: 0; stroke-dasharray: 2 2.4; }
 #awarenessBtn.active { background: var(--accent-soft); color: var(--accent); }
 #awarenessBtn.active .deep-ring { opacity: 1; }
+
+/* a newer version is on GitHub Pages */
+#updBar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #e8f0fd; color: #12407f; border-bottom: 1px solid #c4d6f5; font-size: 14px; flex: none; }
+#updBar[hidden] { display: none; }
+#updBar span { flex: 1; }
+#updBar button { border: 1px solid #c4d6f5; background: #fff; padding: 4px 10px; color: #12407f; }
+#updBar #updGo { background: #1a5fd0; color: #fff; border-color: #1a5fd0; }

@@ -1,5 +1,7 @@
 // Wires everything together.
 import { on, emit } from './bus.js';
+import { VERSION } from './version.js';
+
 import { settings, setSettings } from './settings.js';
 import { idb } from './storage.js';
 import { Board } from './board.js';
@@ -288,3 +290,28 @@ else {
   setTimeout(warmCas, 6000);
   setTimeout(() => changes.maybeOfferImprovements(), 3000);
 }
+
+// ---------- updates ----------
+// Browsers keep the app's main page for a while after an update, so a new version can arrive late. Ask the
+// server (bypassing every cache) which version is current; if it is a different one, offer to load it.
+async function checkForUpdate() {
+  try {
+    const r = await fetch(`js/version.js?check=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const latest = ((await r.text()).match(/VERSION = '([^']+)'/) || [])[1];
+    if (!latest || latest === VERSION || latest < VERSION) return;
+    const bar = $('#updBar');
+    bar.querySelector('span').textContent = `A new version of Live Board is ready (${latest}; this one is ${VERSION}).`;
+    bar.hidden = false;
+  } catch { /* offline: try again later */ }
+}
+$('#updGo').addEventListener('click', async () => {
+  $('#updGo').textContent = 'Updating…';
+  try { await sessions.save(); } catch {}
+  // refresh the browser's stored copy of the main page, then load it
+  try { await fetch(location.pathname, { cache: 'reload' }); } catch {}
+  location.reload();
+});
+setTimeout(checkForUpdate, 4000);
+setInterval(checkForUpdate, 20 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });

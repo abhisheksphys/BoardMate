@@ -752,9 +752,11 @@ export class Board {
       this.eraseAt(w);
     } else if (this.tool === 'select') {
       const a = this.activeBlock;
-      if (a && this.page.blocks.includes(a) && this.hitHandle(a, w, e.pointerType === 'touch')) {
-        // drag the corner handle to resize (keeps proportions); Claude's blocks get a new letter size on release
-        this.drawing = { ...base, resize: a, from: { x: a.x, y: a.y, w: a.w, h: a.h, fontPx: a.fontPx, strokePx: a.strokePx, maxW: a.maxW }, start: w };
+      const handle = a && this.page.blocks.includes(a) ? this.hitHandle(a, w, e.pointerType === 'touch') : null;
+      if (handle) {
+        // a corner: resize, keeping proportions, the opposite corner stays put (Claude's blocks get a new letter
+        // size on release); the left/right edge of Claude's blocks: the width, text rewraps, letters stay the size
+        this.drawing = { ...base, resize: a, handle, from: { x: a.x, y: a.y, w: a.w, h: a.h, fontPx: a.fontPx, strokePx: a.strokePx, maxW: a.maxW, fixedW: a.fixedW }, start: w };
       } else {
         const b = this.hitBlock(w, e.pointerType === 'touch');
         this.activeBlock = b;
@@ -767,9 +769,51 @@ export class Board {
     this.renderLive();
   }
 
+  // Dragging the left or right edge of one of Claude's text blocks: a new width; the text rewraps as you drag
+  // (letters keep their size). It stays within the page (notebook) and is never narrower than a few words.
+  dragWidth(d, w) {
+    const b = d.resize, fw = d.from.w || 100, fs = b.fontPx || 22;
+    const area = this.layout ? this.writeArea() : null;
+    let newW = d.handle === 'e' ? fw + (w.x - d.start.x) : fw - (w.x - d.start.x);
+    newW = Math.max(fs * 5, newW);
+    if (area) newW = Math.min(newW, d.handle === 'e' ? area.right - d.from.x : d.from.x + fw - area.left);
+    d.newW = newW;
+    d.guideX = d.handle === 'e' ? d.from.x + newW : d.from.x + fw - newW;
+    if (d.handle === 'w') b.x = d.guideX;
+    // rewrap live, one layout at a time (each one is quick: the typeset pieces are cached)
+    if (!d.laying) {
+      d.laying = true;
+      const target = newW;
+      this.relayoutWidth(b, target).finally(() => {
+        d.laying = false;
+        if (this.drawing === d && d.newW !== target) this.dragWidth(d, d.lastW || w);
+      });
+    }
+    d.lastW = w;
+  }
+
+  // Lay a text block out again at width `width` (null: as it was set before), its own width from now on
+  // (not the preferred column width of the writing style).
+  async relayoutWidth(b, width) {
+    if (width) { b.maxW = width; b.fixedW = true; }
+    await this.layoutBlock(b); // replaces the old layout when done (no flicker meanwhile)
+    this.render();
+  }
+
+  // Handles of the selected block: four corners (size) and, on Claude's text blocks, the middle of the left and
+  // right edges (width). Returns 'nw' | 'ne' | 'sw' | 'se' | 'w' | 'e' or null.
+  handlesOf(b) {
+    const x0 = b.x, x1 = b.x + (b.w || 100), y0 = b.y, y1 = b.y + (b.h || 30), ym = (y0 + y1) / 2;
+    const hs = [['se', x1, y1], ['sw', x0, y1], ['ne', x1, y0], ['nw', x0, y0]];
+    if (b.kind !== 'image') hs.push(['e', x1, ym], ['w', x0, ym]);
+    return hs;
+  }
+
   hitHandle(b, w, finger = false) {
     const r = (finger ? 34 : 24) / this.page.view.z; // a fingertip needs a bigger target than the Pencil
-    return Math.hypot(w.x - (b.x + b.w), w.y - (b.y + b.h)) < r;
+    let best = null, bd = r;
+    for (const [id, hx, hy] of this.handlesOf(b)) { const d = Math.hypot(w.x - hx, w.y - hy); if (d < bd) { bd = d; best = id; } }
+    return best;
   }
 
   grabbable(e) {
@@ -818,15 +862,20 @@ export class Board {
       if (d.stroke) this.addPoint(d.stroke, w, ev.pressure, true);
       else if (d.erase) { this.eraserCursor = w; this.eraseAt(w); }
       else if (d.move) { d.move.x = d.from.x + w.x - d.start.x; d.move.y = d.from.y + w.y - d.start.y; }
+      else if (d.resize && (d.handle === 'e' || d.handle === 'w')) this.dragWidth(d, w);
       else if (d.resize) {
         const fw = d.from.w || 100, fh = d.from.h || 30;
+        const sx = d.handle.includes('w') ? -1 : 1, sy = d.handle.includes('n') ? -1 : 1;
         // the handle follows the Pencil diagonally: use whichever direction was dragged more
-        const k = Math.max((fw + (w.x - d.start.x)) / fw, (fh + (w.y - d.start.y)) / fh);
+        const k = Math.max((fw + sx * (w.x - d.start.x)) / fw, (fh + sy * (w.y - d.start.y)) / fh);
         const min = Math.max(30 / this.page.view.z / fw, d.resize.kind === 'image' ? 0 : 8 / (d.from.fontPx || 22));
         const max = d.resize.kind === 'image' ? 20 : 160 / (d.from.fontPx || 22);
         d.k = Math.min(max, Math.max(min, k));
         d.resize.w = fw * d.k;
         d.resize.h = fh * d.k;
+        // the opposite corner stays where it was
+        d.resize.x = sx > 0 ? d.from.x : d.from.x + fw - d.resize.w;
+        d.resize.y = sy > 0 ? d.from.y : d.from.y + fh - d.resize.h;
       }
       else if (d.sel) { d.sel.x1 = w.x; d.sel.y1 = w.y; }
       else if (d.lasso) {
@@ -933,6 +982,16 @@ export class Board {
         this.pushUndo({ move: { id: d.move.id, from: d.from, to: { x: d.move.x, y: d.move.y } } });
         this.markDirty({ x: d.move.x, y: d.move.y, w: d.move.w || 1, h: d.move.h || 1 }, { ai: d.move.author !== 'user' });
       }
+    } else if (d.resize && (d.handle === 'e' || d.handle === 'w')) {
+      const b = d.resize;
+      if (d.newW && Math.abs(d.newW - (d.from.maxW || d.from.w)) > 2) {
+        this.relayoutWidth(b, d.newW).then(() => {
+          this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx, strokePx: b.strokePx, maxW: b.maxW, fixedW: true } } });
+          this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h }, { ai: b.author !== 'user' });
+          this.render();
+          this.saveSoon();
+        });
+      } else if (d.from.maxW !== b.maxW) { Object.assign(b, { x: d.from.x, maxW: d.from.maxW, fixedW: d.from.fixedW }); this.relayoutWidth(b, null); }
     } else if (d.resize) {
       const b = d.resize;
       if (d.k && Math.abs(d.k - 1) > 0.01) {
@@ -946,7 +1005,7 @@ export class Board {
         }
         this.pushUndo({ move: { id: b.id, from: d.from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx, strokePx: b.strokePx, maxW: b.maxW } } });
         this.markDirty({ x: b.x, y: b.y, w: b.w, h: b.h }, { ai: b.author !== 'user' });
-      } else Object.assign(b, { w: d.from.w, h: d.from.h });
+      } else Object.assign(b, { x: d.from.x, y: d.from.y, w: d.from.w, h: d.from.h });
     } else if (d.sel) {
       const s = d.sel;
       const big = s.x1 !== undefined && Math.hypot(s.x1 - s.x0, s.y1 - s.y0) > 8 / this.page.view.z;
@@ -1121,9 +1180,9 @@ export class Board {
     if (op.move) {
       const b = P.blocks.find((x) => x.id === op.move.id);
       if (b) {
-        const before = b.fontPx;
+        const before = b.fontPx, beforeW = b.maxW;
         Object.assign(b, reverse ? op.move.from : op.move.to);
-        if (b.kind !== 'image' && b.fontPx !== before) { this.layouts.delete(b.id); this.layoutBlock(b); }
+        if (b.kind !== 'image' && (b.fontPx !== before || b.maxW !== beforeW)) { this.layouts.delete(b.id); this.layoutBlock(b); }
       }
     }
   }
@@ -1377,7 +1436,7 @@ export class Board {
     // Claude's writing stays inside the page / the visible board: long lines wrap (whole words; inline maths is
     // never cut) at the block's width, or the preferred column width if narrower; wide display maths is scaled down.
     const col = Number(st.columnChars) > 0 ? Number(st.columnChars) * fontPx * 0.5 : Infinity;
-    let maxW = Math.min(b.maxW > 0 ? b.maxW : Infinity, col);
+    let maxW = Math.min(b.maxW > 0 ? b.maxW : Infinity, b.fixedW ? Infinity : col); // a width you set by hand wins
     const FACE = serif ? `Georgia, 'Times New Roman', serif` : FONT;
     const measure = (t, size, bold) => { this.ctx.font = `${bold ? '650 ' : ''}${size}px ${FACE}`; return this.ctx.measureText(t).width; };
     const tex = (t, size, color, display) => texToImage(t, { color, fontPx: size, strokePx: b.strokePx || 0, display });
@@ -1859,14 +1918,27 @@ export class Board {
       ctx.strokeStyle = '#1a5fd0';
       ctx.lineWidth = 1.5 / view.z;
       ctx.strokeRect(ab.x - pad, ab.y - pad, (ab.w || 100) + 2 * pad, (ab.h || 30) + 2 * pad);
-      if (this.tool === 'select') { // the resize handle (images and Claude's blocks)
+      if (this.tool === 'select') { // handles: corners = size, left/right edge = width (text rewraps)
         const hr = 7 / view.z;
-        ctx.beginPath();
-        ctx.arc(ab.x + ab.w, ab.y + ab.h, hr, 0, Math.PI * 2);
         ctx.fillStyle = '#ffffff';
-        ctx.fill();
         ctx.lineWidth = 2 / view.z;
-        ctx.stroke();
+        for (const [id, hx, hy] of this.handlesOf(ab)) {
+          ctx.beginPath();
+          if (id.length === 1) { const hw = 5 / view.z, hh = 16 / view.z; ctx.roundRect ? ctx.roundRect(hx - hw, hy - hh, hw * 2, hh * 2, hw) : ctx.rect(hx - hw, hy - hh, hw * 2, hh * 2); }
+          else ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        // while dragging an edge: where the new edge will be
+        const d = this.drawing;
+        if (d?.resize === ab && d.newW && (d.handle === 'e' || d.handle === 'w')) {
+          ctx.save();
+          ctx.setLineDash([5 / view.z, 4 / view.z]);
+          ctx.strokeStyle = 'rgba(26,95,208,0.6)';
+          const gx = d.handle === 'e' ? d.guideX : d.guideX;
+          ctx.beginPath(); ctx.moveTo(gx, ab.y - 20 / view.z); ctx.lineTo(gx, ab.y + ab.h + 20 / view.z); ctx.stroke();
+          ctx.restore();
+        }
       }
       ctx.restore();
     }
