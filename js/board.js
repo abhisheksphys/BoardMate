@@ -658,6 +658,9 @@ export class Board {
     emit('user-input');
     if (e.pointerType === 'touch') {
       this.touches.set(e.pointerId, this.evtPos(e));
+      // a quick two-finger tap (no pinch, no drag) switches to the last tool: watch for one
+      if (this.touches.size === 2) this.tap2 = { t: performance.now(), start: new Map(this.touches), view: { ...this.page.view }, ok: true };
+      else if (this.touches.size > 2) this.tap2 = null;
       try { this.c.setPointerCapture(e.pointerId); } catch {}
       // Select tool: one finger on an image or block grabs it (move, or resize at the corner handle);
       // one finger on empty space still pans, two fingers still zoom.
@@ -744,7 +747,10 @@ export class Board {
 
   onMove(e) {
     if (this.touches.has(e.pointerId)) {
-      this.touches.set(e.pointerId, this.evtPos(e));
+      const pos = this.evtPos(e);
+      this.touches.set(e.pointerId, pos);
+      const s0 = this.tap2?.start.get(e.pointerId);
+      if (s0 && Math.hypot(pos.sx - s0.sx, pos.sy - s0.sy) > 12) this.tap2.ok = false;
       this.updateGesture();
       return;
     }
@@ -797,8 +803,25 @@ export class Board {
       const g = this.gesture;
       this.touches.delete(e.pointerId);
       this.gesture = null;
+      const t2 = this.tap2;
+      if (!this.touches.size && t2) {
+        this.tap2 = null;
+        if (t2.ok && performance.now() - t2.t < 350) {
+          // two-finger tap: undo the tiny zoom/pan the fingers caused, then tell the app
+          Object.assign(this.page.view, t2.view);
+          this.slide = 0;
+          this.pullAdd = false;
+          this.render();
+          emit('two-finger-tap');
+          return;
+        }
+      }
       if (this.touches.size) { if (this.slide) { this.slide = 0; this.pullAdd = false; this.render(); } this.startGesture(); }
-      else {
+      else if (g?.kind === 'pan' && performance.now() - g.t0 < 350 && e.clientX !== undefined && Math.hypot(this.evtPos(e).sx - g.p0.sx, this.evtPos(e).sy - g.p0.sy) < 10 && this.hitMark(this.toWorld(this.evtPos(e).sx, this.evtPos(e).sy), true)) {
+        // a finger tap on a margin mark (not a swipe)
+        if (this.slide) { this.slide = 0; this.render(); }
+        emit('mark', this.hitMark(this.toWorld(this.evtPos(e).sx, this.evtPos(e).sy), true));
+      } else {
         if ((g?.paging || g?.kind === 'pan') && this.pullAdd) {
           // pulled far enough past the last page: a new page springs in
           this.pullAdd = false;
@@ -1124,9 +1147,41 @@ export class Board {
     return null;
   }
 
-  hitMark(w) {
+  // The handwritten line a margin mark belongs to: strokes left of the mark, at its height (board units).
+  lineAt(m) {
+    let box = null;
+    const band = 45;
+    for (const st of this.page.strokes) {
+      const bb = strokeBBox(st);
+      if (bb.x > m.x + 10 || bb.x + bb.w < m.x - 1400) continue;
+      if (bb.y + bb.h < m.y - band || bb.y > m.y + band) continue;
+      box = union(box, bb);
+    }
+    return box || { x: m.x - 200, y: m.y - 20, w: 200, h: 40 };
+  }
+
+  // Where a block of size w×h can go near a line without covering writing: below the line, else to the
+  // right of the mark, else above. Returns {x, y}.
+  freeSpotNear(line, m, w, h) {
+    const gap = 14;
+    const taken = [...this.page.strokes.map(strokeBBox), ...this.page.blocks.map((b) => ({ x: b.x - 12, y: b.y, w: (b.w || 100) + 12, h: b.h || 30 }))];
+    const hits = (r) => taken.some((t) => t.x < r.x + r.w && t.x + t.w > r.x && t.y < r.y + r.h && t.y + t.h > r.y);
+    const pr = this.layout ? this.pageRect() : null;
+    const onPage = (r) => !pr || (r.x >= PAGE_INSET && r.y >= PAGE_INSET && r.x + r.w <= pr.w - PAGE_INSET && r.y + r.h <= pr.h - PAGE_INSET);
+    const cands = [
+      { x: line.x + 12, y: line.y + line.h + gap },
+      { x: m.x + 26, y: m.y - h / 2 },
+      { x: line.x + 12, y: line.y - gap - h },
+    ];
+    // further down, if the space under the line is taken (the next lines of the derivation)
+    for (let k = 1; k <= 6; k++) cands.push({ x: line.x + 12, y: line.y + line.h + gap + k * 40 });
+    const fit = cands.find((c) => onPage({ ...c, w, h }) && !hits({ ...c, w, h })) || cands.find((c) => !hits({ ...c, w, h })) || cands[0];
+    return fit;
+  }
+
+  hitMark(w, finger = false) {
     if (!settings.showMarks) return null;
-    const r = 14 / this.page.view.z;
+    const r = (finger ? 22 : 14) / this.page.view.z;
     return this.page.marks.find((m) => Math.hypot(m.x - w.x, m.y - w.y) < r) || null;
   }
 

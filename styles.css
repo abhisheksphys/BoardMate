@@ -528,3 +528,7 @@ dialog.pages-sheet[open] { display: flex; }
 .mv-row:disabled { color: var(--muted); }
 .mv-row small { color: var(--muted); font-size: 12px; }
 .mv-ico { width: 22px; text-align: center; }
+
+/* two-finger tap: which tool you switched to */
+#toolToast { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); z-index: 12; padding: 7px 14px; border-radius: 999px; background: rgba(28, 28, 30, 0.86); color: #fff; font-size: 14px; font-weight: 600; pointer-events: none; opacity: 0; transition: opacity .18s; }
+#toolToast.show { opacity: 1; }

@@ -60,12 +60,32 @@ $('#exportDlg')?.addEventListener('click', (e) => { if (e.target === $('#exportD
 
 // ---------- toolbar ----------
 function selectTool(name) {
+  if (name !== board.tool) lastTool = board.tool; // for the two-finger tap
   board.tool = name;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === name));
   if (name !== 'select' && name !== 'lasso' && board.selection) { board.selection = null; board.render(); }
   if (name !== 'eraser') board.eraserCursor = null;
   if (name !== 'select') board.activeBlock = null;
   board.renderLive();
+}
+// A quick two-finger tap on the page: back to the tool used before (Safari can't see the Pencil's own double-tap).
+let lastTool = 'eraser';
+const TOOL_NAMES = { pen: 'Pen', eraser: 'Eraser', select: 'Select', lasso: 'Lasso' };
+on('two-finger-tap', () => {
+  if (!settings.twoFingerSwap) return;
+  const to = lastTool && lastTool !== board.tool ? lastTool : board.tool === 'pen' ? 'eraser' : 'pen';
+  selectTool(to);
+  toolToast(TOOL_NAMES[to] || to);
+});
+function toolToast(text) {
+  let t = $('#toolToast');
+  if (!t) { t = document.createElement('div'); t.id = 'toolToast'; $('#boardWrap').append(t); }
+  t.textContent = text;
+  t.classList.remove('show');
+  void t.offsetWidth;
+  t.classList.add('show');
+  clearTimeout(toolToast.timer);
+  toolToast.timer = setTimeout(() => t.classList.remove('show'), 900);
 }
 const ink = initInkTools({ selectPen: () => selectTool('pen'), selectEraser: () => selectTool('eraser') });
 initImages({ board, panel, selectTool });
@@ -187,11 +207,13 @@ on('locked-tap', () => {
   chip.classList.add('pulse');
 });
 on('mark', (m) => {
+  // ✗ and ! marks: tapping writes the explanation and the fix next to the line (unless set to the panel only)
+  if ((m.kind === 'error' || m.kind === 'warn') && settings.markTap !== 'panel') return agent.explainMark(m);
   const label = { ok: 'Looks right', warn: 'Worth a look', error: 'Possible mistake', note: 'Note' }[m.kind] || 'Note';
   panel.add('info', `**${label}:** ${m.note}`, {
     actions: [
       { label: 'Explain more', run: () => askFrom(`Explain your margin note in more detail: "${m.note}"`, 'mark') },
-      { label: 'Dismiss', run: () => { board.page.marks = board.page.marks.filter((x) => x !== m); board.render(); board.saveSoon(); } },
+      { label: 'Dismiss', run: (btn) => { board.page.marks = board.page.marks.filter((x) => x !== m); board.render(); board.saveSoon(); btn?.closest('.msg')?.remove(); } },
     ],
   });
 });

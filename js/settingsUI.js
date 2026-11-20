@@ -10,6 +10,7 @@ const SECTIONS = [
   ['Claude', [
     { k: 'apiKey', label: 'Anthropic API key', type: 'password', hint: 'Stored only in this browser.' },
     { k: 'routing', label: 'Which model answers', type: 'select', options: [['auto', 'Auto — fast model, hands harder questions to a stronger one (cheapest)'], ['main', 'Always the strong model'], ['deep', 'Always the deepest model (most expensive)']] },
+    { k: 'answerDepth', label: 'How detailed answers are', type: 'select', options: [['auto', 'Fit the question: short for quick facts, full for explanations and derivations'], ['brief', 'Brief: the key point, short'], ['detailed', 'Detailed: full reasoning and steps, every time']] },
     { k: 'webSearch', label: 'Allow web search in answers (papers, arXiv, current values; about ₹1 per search plus reading the results)', type: 'checkbox' },
     { k: 'webSearchMax', label: 'Most web searches in one answer (0 = no limit)', type: 'number', step: 1 },
     { k: 'models.fast', label: 'Fast model (default answers, watching)', type: 'model' },
@@ -22,6 +23,7 @@ const SECTIONS = [
     { k: 'quietIdleSec', label: 'Quiet live: look after you pause for (seconds)', type: 'number' },
     { k: 'watchMaxWaitSec', label: 'While writing non-stop, look at least every (seconds)', type: 'number' },
     { k: 'escalate', label: 'Double-check suspected errors with the strong model', type: 'checkbox' },
+    { k: 'markTap', label: 'Tapping a ✗ or ! mark', type: 'select', options: [['board', 'Claude writes what is wrong and the correct line next to it, on the page'], ['panel', 'Show the short note in the panel']] },
     { k: 'quietLowEffort', label: 'Quiet live: use low reasoning effort for looks (cheaper; check that Claude\'s notes and board requests stay accurate on your handwriting)', type: 'checkbox' },
     { k: 'boardRequests', label: 'Do what I write to Claude on the board (Live and Quiet live; e.g. "Write down the Lagrangian of the Standard Model")', type: 'checkbox' },
     { k: 'liveSpeak', label: 'Speak live comments aloud', type: 'checkbox' },
@@ -55,6 +57,7 @@ const SECTIONS = [
     { k: 'paper', label: 'Default paper for new freeform sessions (each session\'s own paper: the page setup icon next to its title)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
     { k: 'paperSpacing', label: 'Line / dot spacing on the paper', type: 'number', step: 2 },
     { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
+    { k: 'twoFingerSwap', label: 'Two-finger tap on the page switches to the last tool (e.g. pen ↔ eraser)', type: 'checkbox' },
     { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
   ]],
   ['Cost', [
@@ -234,7 +237,7 @@ export class SettingsUI {
     const el = document.getElementById('costBreakdown');
     if (!el) return;
     const s = meter.stats();
-    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', title: 'Session titles and summaries', find: 'Session search', search: 'Web searches (fee per search)', code: 'App changes' };
+    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', mark: 'Explaining tapped error marks', title: 'Session titles and summaries', find: 'Session search', search: 'Web searches (fee per search)', code: 'App changes' };
     const rows = (by, total) => {
       const list = Object.entries(by || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
       if (!list.length) return '<div class="muted">Nothing yet.</div>';

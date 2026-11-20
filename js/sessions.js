@@ -86,6 +86,10 @@ export class Sessions {
     this.panel.onLog = (role, md) => this.log(role, md);
     on('changed', () => this.markChanged());
     on('save', () => this.saveSoon());
+    // a panel message you dismissed is also dropped from the saved chat, so it doesn't come back next time
+    on('panel-dismiss', ({ role, md }) => {
+      for (let i = this.chat.length - 1; i >= 0; i--) if (this.chat[i].role === role && this.chat[i].md === md) { this.chat.splice(i, 1); this.markChanged(); break; }
+    });
     on('cost', ({ cost, purpose }) => {
       if (this.meta && purpose !== 'title' && purpose !== 'find') { this.meta.cost = (this.meta.cost || 0) + cost; this.saveSoon(); }
     });

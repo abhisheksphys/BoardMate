@@ -4,7 +4,7 @@
 // - uses the fast model; suspected errors are re-checked by the main model (not the most expensive one);
 // - pauses when the daily budget is reached.
 import { settings } from './settings.js';
-import { on, union } from './bus.js';
+import { on, emit, union } from './bus.js';
 import { claude, textOf, parseJSON, imageBlock } from './claude.js';
 import { overBudget, fmt } from './costs.js';
 import { textIn } from './pdfbg.js';
@@ -210,10 +210,35 @@ export class Perception {
       const keep = b.page.marks.filter((m) => m.src === 'watch' && !inRegion(m));
       const fresh = issues.filter((i) => Number.isFinite(i.x) && Number.isFinite(i.y)).map((i) => ({ ...b.imageToWorld(crop, i.x, i.y), kind: i.kind || 'note', note: i.note || '' }));
       b.replaceMarks('watch', [...keep.map(({ id, src, ...m }) => m), ...fresh]);
-      if (comment) {
-        this.panel.add('commentary', comment);
-        if (settings.liveSpeak && settings.voiceOut && !this.agent.busy) this.voice.speak(spoken || comment.replace(/\$+/g, ''));
-      }
+      // Every new ✗ / ! gets its explanation in the panel, whether or not Claude also wrote a comment
+      // (before, the panel only showed the optional comment, so some marks came with no words at all).
+      // A mark already explained (same place, same note) is not repeated on later looks.
+      const said = (this.announced ||= new Set());
+      const keyOf = (m) => `${pageId}|${Math.round(m.y / 40)}|${String(m.note).toLowerCase().replace(/\W+/g, '').slice(0, 60)}`;
+      const news = fresh.filter((m) => (m.kind === 'error' || m.kind === 'warn') && m.note && !said.has(keyOf(m)));
+      news.forEach((m) => said.add(keyOf(m)));
+      if (said.size > 500) said.delete(said.values().next().value);
+      if (comment || news.length) {
+        const listed = news.filter((m) => !comment || !comment.toLowerCase().includes(String(m.note).toLowerCase().slice(0, 40)));
+        const text = [comment, ...listed.map((m) => `${m.kind === 'error' ? '✗' : '!'} ${m.note}`)].filter(Boolean).join('\n\n');
+        const liveMark = (m) => b.page.marks.find((x) => x.src === 'watch' && Math.abs(x.x - m.x) < 1 && Math.abs(x.y - m.y) < 1);
+        this.panel.add('commentary', text, {
+          actions: [
+            ...(news.length ? [{ label: news.length > 1 ? 'Write the fixes on the page' : 'Write the fix on the page', run: () => news.forEach((m) => { const lm = liveMark(m); if (lm) this.agent.explainMark(lm); }) }] : []),
+            // Dismiss: the message goes away (also from the session's saved chat), and so do its marks on the page
+            { label: 'Dismiss', run: (btn) => {
+              // its marks: the same notes (a later look may have redrawn them in a slightly different place)
+              const notes = new Set(news.map((m) => m.note));
+              const gone = new Set(b.page.marks.filter((x) => x.src === 'watch' && notes.has(x.note)));
+              if (gone.size) { b.page.marks = b.page.marks.filter((x) => !gone.has(x)); b.render(); b.saveSoon(); }
+              btn?.closest('.msg')?.remove();
+              emit('panel-dismiss', { role: 'commentary', md: text });
+            } },
+          ],
+        });
+        if (settings.liveSpeak && settings.voiceOut && !this.agent.busy) this.voice.speak(spoken || text.replace(/\$+/g, '').replace(/[✗!] /g, ''));
+        this.log(`panel: ${comment ? 'comment' : ''}${comment && listed.length ? ' + ' : ''}${listed.length ? `${listed.length} mark explanation(s)` : ''}`);
+      } else if (fresh.some((m) => m.kind === 'error' || m.kind === 'warn')) this.log('marks already explained in the panel earlier: not repeated');
     } catch (e) {
       this.log('error: ' + (e.message || e));
       this.panel.status('Watcher: ' + (e.message || e));

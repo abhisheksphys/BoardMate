@@ -5,7 +5,8 @@
 // tools + instructions + past conversation are prompt-cached; old turns are compacted (no images,
 // short tool outputs) so the cached prefix stays stable; history is trimmed in chunks.
 import { settings } from './settings.js';
-import { claude, textOf, imageBlock } from './claude.js';
+import { claude, textOf, imageBlock, parseJSON } from './claude.js';
+import { texErrors } from './mathrender.js';
 import { TOOL_SCHEMAS, runTool } from './tools.js';
 import { fmt, overBudget } from './costs.js';
 import { pageText } from './pdfbg.js';
@@ -36,6 +37,12 @@ function answerText(resp) {
 const TIER_NAMES = { fast: 'Haiku', main: 'Sonnet', deep: 'Opus' };
 const nextTier = (t) => (t === 'fast' ? 'main' : 'deep');
 
+const MARK_SYSTEM = `You explain one margin mark on a scientist's handwritten page. Live checking put a ✗ (mistake) or ! (doubtful step) next to a line. Look again carefully at that line and at the lines above it that lead to it.
+Reply with ONE JSON object: {"lines": ["...", "..."], "correct": false}
+- lines: 1 to 3 short lines to be written on the page next to the marked line: first what is wrong and why, in a few words with inline math ($...$); then the corrected expression for that line (a whole line in $$...$$). Like a teacher's note in the margin: no preamble, no "the error is that".
+- If on a careful second look the line is actually right, set "correct": true and give one line saying why it is fine.
+- Standard MathJax LaTeX only; in JSON strings escape backslashes (\\nabla).`;
+
 function systemPrompt() {
   const s = settings;
   const custom = s.customInstructions?.length ? `\nStanding instructions from the user:\n- ${s.customInstructions.join('\n- ')}\n` : '';
@@ -62,10 +69,15 @@ Answering
 - The session may have several pages; you see only the current one. board_context.other_pages lists the others (their notes and your blocks, as text). When a question needs another page ("look at page 3", "use the result from earlier", "compare with page 2"), call view_page for it. Use go:true only when the user asks to go to / open / show that page.
 - Work is organised in sessions. To bring something from another session ("the boundary conditions from yesterday"), call list_sessions, then read_session, then write it here.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
-- Be concise and precise. The user is an expert; skip basics and preamble. Shorter answers also cost less.
+- Answer depth (${({ brief: 'the user chose BRIEF answers: give the key point and the essential result in a few lines; they will ask for more', detailed: 'the user chose DETAILED answers: always give the full reasoning, every step of a derivation, and the physical meaning', auto: 'fit the depth to the question' })[s.answerDepth] || 'fit the depth to the question'}). How deep to go is decided by the question and the page, not by length rules:
+  - a quick factual question (a value, a definition, "is this sign right?", "what's the next line?") gets a direct answer in a line or a few;
+  - "explain", "why", "how does", "derive", "prove", "walk me through", a conceptual question, or a question about a long piece of work gets a complete answer: the reasoning in order, every non-trivial step of a derivation, the assumptions, and what the result means physically. Use as much length as that takes;
+  - checking work: say what is right and what is wrong, where, and why, with the corrected step.
+  - The user is an expert: skip textbook basics, definitions they obviously know and preamble, but never skip steps of the argument itself. No filler, no restating the question, no closing summary that repeats the answer.
+  - If the user asks for more detail, or says an answer was too short, take that as how they want this kind of question answered for the rest of the session.
 
 Choosing the right model
-- Several models share this conversation. If you are the fast model and the question needs careful multi-step reasoning (a long derivation, a proof, subtle physics, judging whether tricky work is correct) or you are not confident, call hand_off with level "main"; for the hardest problems use "deep". Do not hand off for reading the page, routine algebra (use cas), definitions, or short explanations.
+- Several models share this conversation. If you are the fast model and the question needs careful multi-step reasoning (a long derivation, a proof, subtle physics, judging whether tricky work is correct) or you are not confident, call hand_off with level "main"; for the hardest problems use "deep". Also hand off to "main" when the question asks for an in-depth explanation (a "why"/"explain"/"walk me through" about real physics, not a definition): those answers need the stronger model's depth. Do not hand off for reading the page, routine algebra (use cas), definitions, or quick factual answers.
 
 Changing the app itself
 - Settings change through update_settings. Apply it when the user asks ("from now on…", "move the panel to the left"). If you only think a change would help, suggest it and wait for a yes.
@@ -328,6 +340,73 @@ export class Agent {
     if (!last || last.role !== 'assistant') return;
     const uses = (last.content || []).filter((c) => c.type === 'tool_use');
     if (uses.length) ex.push({ role: 'user', content: uses.map((u) => ({ type: 'tool_result', tool_use_id: u.id, content: 'Cancelled.', is_error: true })) });
+  }
+
+  // Tap on a ✗ or ! margin mark: the strong model looks at that spot again and writes, next to the line,
+  // what is wrong and what it should be. The result is an ordinary block of yours to keep, move or erase.
+  async explainMark(m) {
+    const b = this.board;
+    const page = b.page;
+    if (!settings.apiKey) return this.panel.add('error', 'Add your Anthropic API key in Settings first.');
+    const existing = m.explained && page.blocks.find((x) => x.id === m.explained);
+    if (existing) { b.ensureVisible({ x: existing.x, y: existing.y, w: existing.w || 100, h: existing.h || 30 }); return this.panel.status('The explanation is already on the page, under the line.'), setTimeout(() => this.panel.status(''), 2500); }
+    if (m.busy) return;
+    m.busy = true;
+    for (let t = 0; this.busy && t < 60; t++) await new Promise((r) => setTimeout(r, 500)); // let an answer finish first
+    this.panel.status('Claude is looking at the marked line…');
+    try {
+      const line = b.lineAt(m);
+      // the marked line, a few lines above it (where it came from) and a little below
+      const region = { x: Math.min(line.x, m.x - 300) - 30, y: line.y - 260, w: Math.max(m.x + 40, line.x + line.w) - Math.min(line.x, m.x - 300) + 60, h: line.h + 260 + 120 };
+      if (page.bg) await b.bgReady(page, 1500);
+      const snap = b.snapshot({ region, maxDim: 1000, maxScale: 2, pad: 0 });
+      const at = b.worldToImage(snap, m.x, m.y);
+      const lr = b.rectToImage(snap, line);
+      const notes = page.notebook.slice(-20).map((e) => ({ latex: e.latex, description: e.description }));
+      const resp = await claude({
+        model: settings.models.main,
+        system: MARK_SYSTEM,
+        messages: [{ role: 'user', content: [imageBlock(snap), { type: 'text', text: `The ${m.kind === 'error' ? 'mistake' : 'doubtful step'} mark is at (${at.x}, ${at.y}) in this image; the marked line spans x ${lr.x}–${lr.x + lr.w}, y ${lr.y}–${lr.y + lr.h}.\nThe short note on the mark: "${m.note || ''}"\nNotes about the rest of the page: ${JSON.stringify(notes)}\nReturn the JSON only.` }] }],
+        max_tokens: 6000,
+        purpose: 'mark',
+      });
+      const j = parseJSON(textOf(resp)) || {};
+      let lines = (Array.isArray(j.lines) ? j.lines : []).map(String).filter((l) => l.trim()).slice(0, 4);
+      if (!lines.length) lines = [m.note || 'Could not work out the problem here.'];
+      if ((await texErrors(lines)).length) lines = [String(m.note || lines.join(' ')).replace(/\$/g, '')]; // broken LaTeX: the plain note instead
+      if (j.correct) {
+        // on a closer look the step is fine: the mark turns into a tick
+        m.kind = 'ok';
+        m.note = lines.join(' ');
+        b.renderLive();
+        b.saveSoon();
+        this.panel.add('info', `**On a second look this step is right:** ${lines.join(' ')}`);
+        return;
+      }
+      const style = b.aiStyle({ x: line.x, y: line.y + line.h }, null, 0.85);
+      b.setLocked(true);
+      let blk;
+      try {
+        blk = await b.addBlock({ lines, x: line.x + 12, y: line.y + line.h + 14, fontPx: style.fontPx, color: style.color, strokePx: style.strokePx }, {});
+        const spot = b.freeSpotNear(line, m, blk.w || 200, blk.h || 40);
+        blk.x = spot.x;
+        blk.y = spot.y;
+        if (b.layout) await b.keepOnPage(blk);
+        blk.forMark = m.id;
+        m.explained = blk.id;
+        b.markDirty({ x: blk.x, y: blk.y, w: blk.w || 0, h: blk.h || 0 });
+        b.render();
+        b.saveSoon();
+      } finally {
+        b.setLocked(false);
+      }
+      this.panel.add('info', `**${m.kind === 'error' ? 'Mistake' : 'Worth a look'}:** ${lines.join('  \n')}`, { noLog: true });
+    } catch (e) {
+      this.panel.add('error', 'Could not explain the mark: ' + (e.message || e));
+    } finally {
+      m.busy = false;
+      this.panel.status('');
+    }
   }
 
   answerActions(text) {
