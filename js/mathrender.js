@@ -34,15 +34,16 @@ export async function texErrors(lines) {
 
 // One board line -> { plain, text } or { tex, display }.
 // "$$...$$" or "\[...\]" = display math; other lines are text with optional inline $...$.
-export function lineToTex(line) {
+// opts.serif: plain words are typeset too (\text{}), so text and maths share one typeface; opts.bold: \textbf{}.
+export function lineToTex(line, { serif = false, bold = false } = {}) {
   const s = String(line).trim();
   const m = s.match(/^\$\$([\s\S]*)\$\$$/) || s.match(/^\\\[([\s\S]*)\\\]$/);
   if (m) return { tex: m[1].trim(), display: true };
   const parts = s.split(/(\$[^$]+\$)/g).filter(Boolean);
-  if (!parts.some((p) => p.length > 1 && p.startsWith('$') && p.endsWith('$'))) return { plain: true, text: s };
-  const tex = parts
-    .map((p) => (p.length > 1 && p.startsWith('$') && p.endsWith('$') ? p.slice(1, -1) : textTex(p)))
-    .join(' ');
+  const isMath = (p) => p.length > 1 && p.startsWith('$') && p.endsWith('$');
+  if (!parts.some(isMath) && !serif) return { plain: true, text: s };
+  const word = (t) => (bold ? textTex(t).replace('\\text{', '\\textbf{') : textTex(t));
+  const tex = parts.map((p) => (isMath(p) ? (bold ? `\\boldsymbol{${p.slice(1, -1)}}` : p.slice(1, -1)) : word(p))).join(' ');
   return { tex, display: false };
 }
 

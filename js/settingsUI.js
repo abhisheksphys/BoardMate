@@ -1,5 +1,5 @@
 // Settings dialog, generated from a field list so new settings are one line to add.
-import { settings, saveSettings, getPath, setPath } from './settings.js';
+import { settings, saveSettings, getPath, setPath, WRITE_PRESETS } from './settings.js';
 import { addPdf, listBooks, removeBook } from './library.js';
 import { escapeHtml } from './bus.js';
 import { VERSION } from './version.js';
@@ -61,6 +61,19 @@ const SECTIONS = [
     { k: 'doubleTapAction', label: 'Double tap on the page with one finger runs', type: 'select', get options() { return [['', 'Nothing'], ...(settings.savedActions || []).map((a) => [a.name, `${a.name} (action button)`])]; } },
     { k: 'twoFingerSwap', label: 'Two-finger tap on the page switches to the last tool (e.g. pen ↔ eraser)', type: 'checkbox' },
     { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
+  ]],
+  ['Board writing style', [
+    { k: 'writeStyle', label: 'Preset (sets everything below; change any of them and it becomes Custom)', type: 'select', options: [['compact', 'Compact: tight, fits a lot on the page'], ['comfortable', 'Comfortable: easy to read (default)'], ['textbook', 'Textbook: airy, centred equations, larger headings'], ['custom', 'Custom']] },
+    { k: 'textFont', label: 'Text font', type: 'select', options: [['serif', 'Serif: the same typeface as the maths (looks typeset)'], ['sans', 'Sans-serif']] },
+    { k: 'lineSpacing', label: 'Line spacing', type: 'select', options: [['compact', 'Compact'], ['normal', 'Normal'], ['relaxed', 'Relaxed']] },
+    { k: 'paraSpacing', label: 'Space before headings and around display equations', type: 'select', options: [['small', 'Small'], ['normal', 'Normal'], ['large', 'Large']] },
+    { k: 'columnChars', label: 'Longest line, in characters (0 = as wide as the page allows)', type: 'number', step: 5 },
+    { k: 'displayAlign', label: 'Display equations', type: 'select', options: [['center', 'Centred'], ['left', 'Left-aligned with the text']] },
+    { k: 'stepIndent', label: 'Indent the lines under a heading', type: 'select', options: [['none', 'No indent'], ['small', 'Small'], ['medium', 'Medium']] },
+    { k: 'mathScale', label: 'Display equation size, relative to the text (1 = same)', type: 'number', step: 0.05 },
+    { k: 'headingScale', label: 'Heading size', type: 'select', options: [['small', 'Small'], ['normal', 'Normal'], ['large', 'Large']] },
+    { k: 'headingColor', label: 'Heading colour', type: 'select', options: [['darker', 'A darker shade of Claude\'s colour'], ['same', 'The same colour']] },
+    { k: 'aiSideBar', label: 'Thin line to the left of Claude\'s blocks', type: 'checkbox' },
   ]],
   ['Cost', [
     { k: 'dailyBudgetUSD', label: 'Daily budget in US dollars (0 = no limit). When reached, watching pauses; answers still work.', type: 'number', step: 0.1 },
@@ -228,6 +241,17 @@ export class SettingsUI {
     });
   }
 
+  // Board writing style: picking a preset fills in its settings; changing one of them makes the preset "Custom".
+  styleChanged(el) {
+    const keys = Object.keys(WRITE_PRESETS.comfortable);
+    const field = (k) => document.getElementById('set-' + k);
+    if (el.id === 'set-writeStyle') {
+      const p = WRITE_PRESETS[el.value];
+      if (!p) return;
+      for (const k of keys) { const f = field(k); if (!f) continue; if (f.type === 'checkbox') f.checked = !!p[k]; else f.value = String(p[k]); }
+    } else if (keys.some((k) => el.id === 'set-' + k) && field('writeStyle')) field('writeStyle').value = 'custom';
+  }
+
   applyWhen() {
     this.dlg.querySelectorAll('.when').forEach((el) => {
       const ctl = document.getElementById(el.dataset.when);
@@ -321,7 +345,7 @@ export class SettingsUI {
         ta.focus(); ta.select();
       }
     });
-    d.addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') this.applyWhen(); });
+    d.addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') this.applyWhen(); this.styleChanged(e.target); });
     d.querySelector('#backupNow').addEventListener('click', async () => {
       const bk = window.liveBackup;
       const st = d.querySelector('#backupStatus');

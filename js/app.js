@@ -250,7 +250,12 @@ $('#costBtn').addEventListener('click', () => {
 });
 
 // ---------- settings → UI ----------
+const STYLE_KEYS = ['textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar'];
+let styleStamp = null;
 function applySettings() {
+  const stamp = STYLE_KEYS.map((k) => settings[k]).join('|');
+  if (styleStamp !== null && stamp !== styleStamp) board.restyle(); // Claude's blocks take the new look at once
+  styleStamp = stamp;
   $('#attention').value = settings.attention;
   const deep = settings.awareness === 'deep';
   $('#awarenessBtn').classList.toggle('active', deep);

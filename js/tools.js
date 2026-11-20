@@ -27,6 +27,7 @@ export const TOOL_SCHEMAS = [
     description:
       'Write typeset content on the board in the AI colour. `lines`: one entry per line. A line wrapped in $$...$$ is display math; other lines are text that may contain inline $...$; ' +
       '"# Title" / "## Section" lines are headings; "- item" is a bullet. Long lines wrap automatically to fit the page (or the visible board); in a notebook, content longer than the page continues on the next page. ' +
+      'It never overlaps what is already on the page: if the spot you choose is crowded (e.g. a selection inside a block or paragraph), it goes below that whole block or paragraph instead. ' +
       'Write as much as the request needs: a full explanation or derivation gets headings, explanatory sentences and every step, like a complete answer; a correction or a missing step stays short. Position: anchor "below_content" (default), "below_selection", "right_of_selection", or "at_xy" with x,y = top-left in pixels of the latest page image.',
     input_schema: {
       type: 'object',
@@ -205,6 +206,11 @@ export async function runTool(use, ctx) {
         else if (anchor === 'below_selection' && sel) pos = { x: sel.x, y: sel.y + sel.h + gap };
         else if (anchor === 'right_of_selection' && sel) pos = { x: sel.x + sel.w + gap * 1.5, y: sel.y };
         else pos = cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
+        // don't write over what is already there: a crowded spot (e.g. a selection inside a block) moves below its group
+        {
+          const f = { x: pos.x }; board.fitToArea(f); // where it will really start, and how wide it can be
+          pos = board.placeFree({ x: f.x, y: pos.y }, { w: f.maxW, h: lines.length * fontPx * 1.9 }, sel || null);
+        }
         // Check the LaTeX first: a broken line is reported back for fixing instead of being written.
         const bad = await texErrors(lines);
         if (bad.length) {

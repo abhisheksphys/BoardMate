@@ -8,6 +8,18 @@ export const DEFAULTS = {
   // fast = default for answers and watching; main/deep = used only when a question needs them.
   models: { fast: 'claude-haiku-5-5', main: 'claude-sonnet-5-5', deep: 'claude-opus-5-5' },
   routing: 'auto', // auto (fast, hands off when needed) | main | deep
+  // How Claude's board writing looks (a preset sets all of them; any change makes it "custom")
+  writeStyle: 'comfortable', // compact | comfortable | textbook | custom
+  textFont: 'serif', // serif = the same typeface as the maths | sans
+  lineSpacing: 'normal', // compact | normal | relaxed
+  paraSpacing: 'normal', // small | normal | large: space before headings and around display equations
+  columnChars: 75, // longest line in characters (0 = as wide as the page allows)
+  displayAlign: 'center', // center | left
+  stepIndent: 'small', // none | small | medium: lines under a heading are indented
+  mathScale: 1, // display equations, relative to the text
+  headingScale: 'normal', // small | normal | large
+  headingColor: 'darker', // same | darker
+  aiSideBar: true, // the thin line to the left of Claude's blocks
   awareness: 'normal', // normal | deep (more looks at other parts of the page, step-back looks in pauses)
   markTap: 'board', // tapping a ✗ / ! mark: board = Claude writes what is wrong and the fix next to the line | panel = the note in the panel
   answerDepth: 'auto', // auto (as much as the question needs) | brief | detailed
@@ -96,7 +108,7 @@ export const DEFAULTS = {
 
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
-  'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'markTap', 'quietLowEffort', 'liveSpeak',
+  'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'writeStyle', 'textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'markTap', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
@@ -129,6 +141,13 @@ delete settings.aiMatchSize;
 if (settings.doubleTapAction == null) settings.doubleTapAction = (settings.savedActions || []).find((a) => /^aop$/i.test(a.name))?.name || '';
 // Removed: both restarted listening without a tap, and on iPad a run started that way hears nothing.
 delete settings.voiceFreshRuns; delete settings.voiceWatchdogSec;
+
+// Board-writing presets: one choice sets every style setting (each can still be changed on its own).
+export const WRITE_PRESETS = {
+  compact: { textFont: 'serif', lineSpacing: 'compact', paraSpacing: 'small', columnChars: 0, displayAlign: 'left', stepIndent: 'none', mathScale: 1, headingScale: 'small', headingColor: 'same', aiSideBar: true },
+  comfortable: { textFont: 'serif', lineSpacing: 'normal', paraSpacing: 'normal', columnChars: 75, displayAlign: 'center', stepIndent: 'small', mathScale: 1, headingScale: 'normal', headingColor: 'darker', aiSideBar: true },
+  textbook: { textFont: 'serif', lineSpacing: 'relaxed', paraSpacing: 'large', columnChars: 65, displayAlign: 'center', stepIndent: 'small', mathScale: 1.08, headingScale: 'large', headingColor: 'darker', aiSideBar: false },
+};
 
 export function saveSettings() {
   localStorage.setItem(KEY, JSON.stringify(settings));

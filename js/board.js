@@ -61,7 +61,16 @@ function tracePath(ctx, path) {
   ctx.closePath();
 }
 
-export function strokeBBox(s) {
+export // a darker shade of a #rrggbb colour (headings)
+function darker(c, k = 0.35) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(c || ''));
+  if (!m) return c;
+  const n = parseInt(m[1], 16);
+  const ch = (v) => Math.round(v * (1 - k)).toString(16).padStart(2, '0');
+  return `#${ch(n >> 16)}${ch((n >> 8) & 255)}${ch(n & 255)}`;
+}
+
+function strokeBBox(s) {
   if (s._bb) return s._bb;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of s.points) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
@@ -1341,77 +1350,104 @@ export class Board {
       return lay;
     }
     const fontPx = b.fontPx || 22;
-    const gap = fontPx * 0.45;
+    // the board writing style (Settings → Board writing style; a preset sets these)
+    const st = settings;
+    const serif = st.textFont !== 'sans';
+    const gap = fontPx * ({ compact: 0.25, normal: 0.45, relaxed: 0.75 }[st.lineSpacing] ?? 0.45);
+    const para = fontPx * ({ small: 0.3, normal: 0.6, large: 1.0 }[st.paraSpacing] ?? 0.6);
+    const hScale = { small: 0.88, normal: 1, large: 1.15 }[st.headingScale] ?? 1;
+    const indent = fontPx * ({ none: 0, small: 1.2, medium: 2.4 }[st.stepIndent] ?? 0);
+    const mathScale = Math.max(0.6, Math.min(1.6, Number(st.mathScale) || 1));
+    const headColor = st.headingColor === 'same' ? b.color : darker(b.color);
     const items = [];
     let y = 0, w = 0;
-    // Claude's writing stays inside the page / the visible board: long lines wrap at b.maxW (whole words; inline
-    // maths is never cut), display maths wider than that is scaled down to fit.
-    const maxW = b.maxW > 0 ? b.maxW : Infinity;
-    const opts = (size) => ({ color: b.color, fontPx: size, strokePx: b.strokePx || 0 });
-    const measure = (t, size, bold) => { this.ctx.font = `${bold ? '650 ' : ''}${size}px ${FONT}`; return this.ctx.measureText(t).width; };
-    const pushImg = (im, li) => {
+    // Claude's writing stays inside the page / the visible board: long lines wrap (whole words; inline maths is
+    // never cut) at the block's width, or the preferred column width if narrower; wide display maths is scaled down.
+    const col = Number(st.columnChars) > 0 ? Number(st.columnChars) * fontPx * 0.5 : Infinity;
+    let maxW = Math.min(b.maxW > 0 ? b.maxW : Infinity, col);
+    const FACE = serif ? `Georgia, 'Times New Roman', serif` : FONT;
+    const measure = (t, size, bold) => { this.ctx.font = `${bold ? '650 ' : ''}${size}px ${FACE}`; return this.ctx.measureText(t).width; };
+    const tex = (t, size, color, display) => texToImage(t, { color, fontPx: size, strokePx: b.strokePx || 0, display });
+    const pushImg = (im, li, kind, under) => {
       let iw = im.w, ih = im.h;
-      if (iw > maxW) { const k = Math.max(0.5, maxW / iw); iw *= k; ih *= k; }
-      items.push({ img: im.img, x: 0, y, w: iw, h: ih, li });
+      const room = maxW - (kind === 'display' ? 0 : under ? indent : 0);
+      if (iw > room) { const k = Math.max(0.5, room / iw); iw *= k; ih *= k; }
+      items.push({ img: im.img, x: 0, y, w: iw, h: ih, li, kind, under });
       y += ih + gap;
-      w = Math.max(w, iw);
+      w = Math.max(w, iw + (under && kind !== 'display' ? indent : 0));
     };
-    const pushText = (text, size, bold, li) => {
+    const pushText = (text, size, bold, li, color, under) => {
       const tw = measure(text, size, bold);
-      items.push({ text, x: 0, y, w: tw, h: size * 1.3, fontPx: size, bold, li });
+      items.push({ text, x: 0, y, w: tw, h: size * 1.3, fontPx: size, bold, serif, color, li, kind: bold ? 'heading' : 'text', under });
       y += size * 1.3 + gap;
-      w = Math.max(w, tw);
+      w = Math.max(w, tw + (under ? indent : 0));
     };
+    let underHeading = false;
     for (const [li, raw] of b.lines.entries()) {
       let line = String(raw);
-      // "# Heading" / "## Subheading": bigger and bold, with a little space above; "- item" becomes a bullet
-      let size = fontPx, bold = false;
+      // "# Heading" / "## Subheading": bigger and bold, with space above; "- item" becomes a bullet
+      let size = fontPx, bold = false, color = b.color;
       const hm = line.match(/^\s*(#{1,3})\s+(.*)$/);
       if (hm) {
-        size = fontPx * (hm[1].length === 1 ? 1.35 : hm[1].length === 2 ? 1.18 : 1.06);
+        size = fontPx * (hm[1].length === 1 ? 1.35 : hm[1].length === 2 ? 1.18 : 1.06) * hScale;
         bold = true;
+        color = headColor;
         line = hm[2];
-        if (li) y += fontPx * 0.55;
+        if (li) y += para;
+        underHeading = true;
       }
+      const under = !bold && underHeading;
+      const room = maxW - (under ? indent : 0);
       line = line.replace(/^\s*[-*•]\s+/, '• ').replace(/\*\*([^*]+)\*\*/g, '$1');
-      const L = lineToTex(line);
+      const L = lineToTex(line, { serif, bold });
       if (L.display) {
-        const im = await texToImage(L.tex, { ...opts(size), display: true });
-        if (im && !im.error) { pushImg(im, li); continue; }
-        // shown as text (maths not available): smaller if needed, so it still fits
-        const tw = measure(line, size, bold);
-        pushText(line, tw > maxW ? Math.max(size * 0.5, (size * maxW) / tw) : size, bold, li);
+        if (li && items.length) y += para * 0.5;
+        const im = await tex(L.tex, size * mathScale, color, true);
+        if (im && !im.error) pushImg(im, li, 'display', under);
+        else { const tw = measure(line, size, bold); pushText(line, tw > room ? Math.max(size * 0.5, (size * room) / tw) : size, bold, li, color, under); }
+        y += para * 0.5;
         continue;
       }
-      // a line that fits as it is
-      const whole = L.plain ? null : await texToImage(L.tex, { ...opts(size), display: false });
-      const fits = L.plain ? measure(L.text, size, bold) <= maxW : whole && !whole.error && whole.w <= maxW;
-      if (fits) { if (L.plain) pushText(L.text, size, bold, li); else pushImg(whole, li); continue; }
-      // too wide: break into pieces (words, and each $...$ kept whole) and fill lines up to maxW
+      // the line as it is, if it fits
+      const whole = L.plain ? null : await tex(L.tex, size, color, false);
+      const ok = (im) => im && !im.error;
+      if (L.plain ? measure(L.text, size, bold) <= room : ok(whole) && whole.w <= room) { if (L.plain || !ok(whole)) pushText(L.plain ? L.text : line, size, bold, li, color, under); else pushImg(whole, li, bold ? 'heading' : 'text', under); continue; }
+      if (!L.plain && !ok(whole) && measure(line, size, bold) <= room) { pushText(line, size, bold, li, color, under); continue; }
+      // too wide: break into pieces (words, and each $...$ kept whole) and fill rows up to the width
       const tokens = [];
       for (const part of line.split(/(\$[^$]+\$)/g).filter(Boolean)) {
         if (part.length > 1 && part.startsWith('$') && part.endsWith('$')) tokens.push(part);
         else tokens.push(...(part.match(/\S+\s*|\s+/g) || []));
       }
       const widthOf = async (t) => {
-        if (t.startsWith('$') && t.endsWith('$') && t.length > 1) { const im = await texToImage(t.slice(1, -1), { ...opts(size), display: false }); return im && !im.error ? im.w : measure(t, size, bold); }
+        if (t.startsWith('$') && t.endsWith('$') && t.length > 1) { const im = await tex(t.slice(1, -1), size, color, false); return ok(im) ? im.w : measure(t, size, bold); }
         return measure(t, size, bold);
       };
       const rows = [];
-      let cur = '', curW = 0;
+      let cur = [], curW = 0;
       for (const t of tokens) {
         const tw = await widthOf(t);
-        if (cur && curW + tw > maxW) { rows.push(cur); cur = t.trimStart(); curW = await widthOf(cur); }
-        else { cur += t; curW += tw; }
+        if (cur.length && curW + tw > room) { rows.push(cur); cur = [t]; curW = tw; } else { cur.push(t); curW += tw; }
       }
-      if (cur.trim()) rows.push(cur);
-      for (const r of rows) {
-        const R = lineToTex(r.trim());
-        if (R.plain) { pushText(R.text, size, bold, li); continue; }
-        const im = await texToImage(R.tex, { ...opts(size), display: false });
-        if (im && !im.error) pushImg(im, li); else pushText(r.trim(), size, bold, li);
+      if (cur.length) rows.push(cur);
+      // each row typeset; if the typeset row is still too wide (estimates differ a little), its last word moves down
+      for (let r = 0; r < rows.length; r++) {
+        const text = rows[r].join('').trim();
+        if (!text) continue;
+        const R = lineToTex(text, { serif, bold });
+        if (R.plain) { pushText(R.text, size, bold, li, color, under); continue; }
+        const im = await tex(R.tex, size, color, false);
+        if (ok(im) && im.w > room * 1.02 && rows[r].length > 1) { (rows[r + 1] ||= []).unshift(rows[r].pop()); r--; continue; }
+        if (ok(im)) pushImg(im, li, bold ? 'heading' : 'text', under); else pushText(text, size, bold, li, color, under);
       }
     }
+    // indent lines under headings; centre display equations in the column
+    const colW = Math.max(w, 1); // centred within the block's widest line
+    for (const it of items) {
+      if (it.kind === 'display' && st.displayAlign !== 'left') it.x = Math.max(0, (colW - it.w) / 2);
+      else if (it.under && it.kind !== 'heading') it.x = indent;
+    }
+    w = Math.max(w, ...items.map((it) => it.x + it.w));
     const lay = { items, w, h: Math.max(fontPx, y - gap) };
     b.w = lay.w;
     b.h = lay.h;
@@ -1420,8 +1456,46 @@ export class Board {
     return lay;
   }
 
+  // the board writing style changed: lay Claude's blocks out again (every page; the open one now)
+  restyle() {
+    for (const p of this.pages) for (const b of p.blocks) if (b.kind !== 'image') this.layouts.delete(b.id);
+    this.prepareBlocks();
+    this.prepareNeighbours?.();
+    this.render();
+  }
+
   prepareBlocks() {
     for (const b of this.page.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
+  }
+
+  // A place for new writing of about w × h at `pos` that doesn't run into what is already on the page.
+  // If `pos` is crowded (e.g. a selection inside one of Claude's blocks, or inside a paragraph of your writing),
+  // the writing goes below the whole group the selection belongs to (the block, or the cluster of lines around it),
+  // and further down past anything in the way. Not a hard rule: it only avoids clashes.
+  placeFree(pos, { w, h }, near = null) {
+    const pad = 10;
+    const occupied = [
+      ...this.page.blocks.map((b) => ({ x: b.x - 12, y: b.y, w: (b.w || 100) + 12, h: b.h || 30 })),
+      ...this.page.strokes.map(strokeBBox),
+    ];
+    const hits = (r) => occupied.filter((o) => o.x < r.x + r.w + pad && o.x + o.w + pad > r.x && o.y < r.y + r.h + pad && o.y + o.h + pad > r.y);
+    const first = Math.min(h, 160); // the first lines decide whether the spot is free
+    if (!hits({ x: pos.x, y: pos.y, w, h: first }).length) return pos;
+    // the group: everything the selection touches, grown through neighbours that are close (same paragraph/block)
+    let g = near ? { ...near } : { x: pos.x, y: pos.y - 1, w: 1, h: 1 };
+    const close = (o) => o.x < g.x + g.w + 40 && o.x + o.w + 40 > g.x && o.y < g.y + g.h + 36 && o.y + o.h + 36 > g.y;
+    for (let grew = true, n = 0; grew && n < 200; n++) {
+      grew = false;
+      for (const o of occupied) if (close(o) && (o.x < g.x || o.y < g.y || o.x + o.w > g.x + g.w || o.y + o.h > g.y + g.h)) { g = union(g, o); grew = true; }
+    }
+    const p = { x: Math.max(g.x + 12, this.writeArea().left), y: g.y + g.h + 26 }; // +12: room for a block's side bar
+    // past anything still in the way, further down
+    for (let n = 0; n < 60; n++) {
+      const inWay = hits({ x: p.x, y: p.y, w, h: first });
+      if (!inWay.length) break;
+      p.y = Math.max(...inWay.map((o) => o.y + o.h)) + 26;
+    }
+    return p;
   }
 
   // Where Claude may write: a notebook page minus its margins; on a freeform page, the part of the board you can
@@ -1870,7 +1944,7 @@ export class Board {
 
   drawBlock(ctx, b) {
     const lay = this.layouts.get(b.id);
-    if (b.kind !== 'image') {
+    if (b.kind !== 'image' && settings.aiSideBar !== false) {
       ctx.fillStyle = b.color + '55';
       ctx.fillRect(b.x - 9, b.y, 2.5, b.h || 24);
     }
@@ -1903,8 +1977,8 @@ export class Board {
       if (it.img) {
         try { ctx.drawImage(it.img, b.x + it.x, b.y + it.y, it.w, it.h); } catch {}
       } else {
-        ctx.fillStyle = b.color;
-        ctx.font = `${it.bold ? '650 ' : ''}${it.fontPx}px ${FONT}`;
+        ctx.fillStyle = it.color || b.color;
+        ctx.font = `${it.bold ? '650 ' : ''}${it.fontPx}px ${it.serif ? `Georgia, 'Times New Roman', serif` : FONT}`;
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, b.x + it.x, b.y + it.y + it.fontPx * 0.1);
         const extra = (b.strokePx || 0) - it.fontPx * 0.075; // thicker than the font's own lines: outline the letters too
