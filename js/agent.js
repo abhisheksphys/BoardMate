@@ -10,6 +10,28 @@ import { TOOL_SCHEMAS, runTool } from './tools.js';
 import { fmt, overBudget } from './costs.js';
 
 const MAX_STEPS = 14;
+
+// The app's own tools, plus Anthropic's server-side web search when it is allowed (answers only).
+function toolsNow() {
+  if (!settings.webSearch) return TOOL_SCHEMAS;
+  const max = Math.floor(Number(settings.webSearchMax) || 0);
+  return [...TOOL_SCHEMAS, { type: 'web_search_20250305', name: 'web_search', ...(max > 0 ? { max_uses: max } : {}) }];
+}
+
+// Answer text for the panel. With web search the reply comes in many small cited pieces: join them
+// without breaks (they are parts of one paragraph) and list the cited pages as sources at the end.
+function answerText(resp) {
+  const blocks = (resp.content || []).filter((b) => b.type === 'text');
+  let out = '';
+  blocks.forEach((b, i) => {
+    const cited = b.citations?.length || blocks[i - 1]?.citations?.length;
+    out += (i === 0 ? '' : cited ? '' : '\n') + b.text;
+  });
+  const seen = new Map();
+  for (const b of blocks) for (const c of b.citations || []) if (c.url && !seen.has(c.url)) seen.set(c.url, c.title || c.url);
+  if (seen.size) out = out.trim() + '\n\n**Sources:** ' + [...seen].map(([u, t]) => `[${t.replace(/[\[\]]/g, '')}](${u})`).join(' · ');
+  return out.trim();
+}
 const TIER_NAMES = { fast: 'Haiku', main: 'Sonnet', deep: 'Opus' };
 const nextTier = (t) => (t === 'fast' ? 'main' : 'deep');
 
@@ -34,6 +56,7 @@ Answering
 - Use annotate to flag a specific spot (an error, a check, a note).
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
 - Use search_library and show_page for the user's PDFs (the shared library plus this session's own materials).
+- ${s.webSearch ? 'web_search: when the user asks you to look something up (a paper, an arXiv preprint, a reference, a current value), search as much as it takes to find it. Without being asked, search only when the question needs current or outside facts (a recent measurement, a specific paper\'s result, a convention in a named source); never for textbook physics or derivations. Your citations are listed as sources under the answer automatically.' : 'Web search is turned off in settings: if a question needs it, say so.'}
 - Work is organised in sessions. To bring something from another session ("the boundary conditions from yesterday"), call list_sessions, then read_session, then write it here.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
 - Be concise and precise. The user is an expert; skip basics and preamble. Shorter answers also cost less.
@@ -67,11 +90,13 @@ function compactBlock(b) {
 // Claude's reasoning ("thinking") blocks are signed against the exact conversation before them. Once an
 // earlier turn is shortened (images dropped, history trimmed) they no longer match and the API rejects the
 // request, so they are removed from finished turns. Only the turn in progress needs them.
-const isThinking = (b) => b && (b.type === 'thinking' || b.type === 'redacted_thinking');
+// Web search blocks (the search and its results, which are long) are dropped from finished turns too,
+// so later questions don't keep paying to re-read old search results; the answer text stays.
+const isThinking = (b) => b && (b.type === 'thinking' || b.type === 'redacted_thinking' || b.type === 'server_tool_use' || b.type === 'web_search_tool_result');
 function dropThinking(ex) {
   return ex.map((m) => {
-    if (m.role !== 'assistant' || !Array.isArray(m.content) || !m.content.some(isThinking)) return m;
-    const content = m.content.filter((b) => !isThinking(b));
+    if (m.role !== 'assistant' || !Array.isArray(m.content) || !m.content.some((b) => isThinking(b) || b.citations)) return m;
+    const content = m.content.filter((b) => !isThinking(b)).map((b) => (b.citations ? { type: 'text', text: b.text } : b));
     return { ...m, content: content.length ? content : [{ type: 'text', text: '(no reply text)' }] };
   });
 }
@@ -183,7 +208,7 @@ export class Agent {
           model: settings.models[this.tier] || settings.models.main,
           system: systemPrompt(),
           messages: msgs,
-          tools: TOOL_SCHEMAS,
+          tools: toolsNow(),
           max_tokens: this.tier === 'fast' ? 8000 : 16000, // includes Claude's reasoning; only what is used is paid for
           signal: this.abort.signal,
           purpose: 'answer',
@@ -203,8 +228,10 @@ export class Agent {
         }
         cost += resp._cost || 0;
         ex.push({ role: 'assistant', content: resp.content });
-        const t = textOf(resp);
+        const t = answerText(resp);
         if (t) lastEl = this.panel.add('assistant', t, { actions: this.answerActions(t) });
+        // A long web search can pause mid-answer: send it back as it is and Claude carries on.
+        if (resp.stop_reason === 'pause_turn') { this.panel.status('Searching the web…'); continue; }
         const uses = resp.content.filter((c) => c.type === 'tool_use');
         if (!uses.length) break;
         const results = [];

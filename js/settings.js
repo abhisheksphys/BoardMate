@@ -8,6 +8,8 @@ export const DEFAULTS = {
   // fast = default for answers and watching; main/deep = used only when a question needs them.
   models: { fast: 'claude-haiku-5-5', main: 'claude-sonnet-5-5', deep: 'claude-opus-5-5' },
   routing: 'auto', // auto (fast, hands off when needed) | main | deep
+  webSearch: true, // let Claude search the web in answers (never while watching)
+  webSearchMax: 0, // most searches in one answer (0 = no limit)
 
   // Perception
   attention: 'quiet', // live | quiet | demand

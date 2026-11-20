@@ -52,6 +52,19 @@ export const meter = {
     emit('cost', { cost: c, purpose, model });
     return c;
   },
+  // Fixed fees that are not tokens (web searches).
+  recordFlat(usd, purpose) {
+    if (!(usd > 0)) return 0;
+    const s = load();
+    s.today.total += usd;
+    s.today.by[purpose] = (s.today.by[purpose] || 0) + usd;
+    s.monthTotal += usd;
+    s.monthBy[purpose] = (s.monthBy[purpose] || 0) + usd;
+    localStorage.setItem(KEY, JSON.stringify(s));
+    this.session += usd;
+    emit('cost', { cost: usd, purpose });
+    return usd;
+  },
   stats() {
     const s = load();
     return { session: this.session, today: s.today.total, byPurpose: s.today.by, month: s.monthTotal, monthByPurpose: s.monthBy };

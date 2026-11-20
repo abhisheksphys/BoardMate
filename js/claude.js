@@ -8,7 +8,9 @@ const cc = (long) => (long ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemer
 // Returns a copy of message i with a cache breakpoint on its last block.
 function markMessage(msg, long) {
   const content = typeof msg.content === 'string' ? [{ type: 'text', text: msg.content }] : msg.content.slice();
-  const i = content.length - 1;
+  // only block types that take a cache marker (not reasoning or web-search blocks)
+  let i = content.length - 1;
+  while (i >= 0 && !['text', 'image', 'document', 'tool_use', 'tool_result'].includes(content[i].type)) i--;
   if (i < 0) return msg;
   content[i] = { ...content[i], cache_control: cc(long) };
   return { ...msg, content };
@@ -59,6 +61,9 @@ export async function claude({ model, system, messages, tools, max_tokens = 4096
   }
   const json = await res.json();
   json._cost = meter.record(model, json.usage || {}, purpose);
+  // web searches: $10 per 1,000, on top of tokens (the results are billed as input tokens above)
+  const searches = json.usage?.server_tool_use?.web_search_requests || 0;
+  if (searches) json._cost += meter.recordFlat(searches * 0.01, 'search');
   return json;
 }
 

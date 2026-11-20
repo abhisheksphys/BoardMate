@@ -10,6 +10,8 @@ const SECTIONS = [
   ['Claude', [
     { k: 'apiKey', label: 'Anthropic API key', type: 'password', hint: 'Stored only in this browser.' },
     { k: 'routing', label: 'Which model answers', type: 'select', options: [['auto', 'Auto — fast model, hands harder questions to a stronger one (cheapest)'], ['main', 'Always the strong model'], ['deep', 'Always the deepest model (most expensive)']] },
+    { k: 'webSearch', label: 'Allow web search in answers (papers, arXiv, current values; about ₹1 per search plus reading the results)', type: 'checkbox' },
+    { k: 'webSearchMax', label: 'Most web searches in one answer (0 = no limit)', type: 'number', step: 1 },
     { k: 'models.fast', label: 'Fast model (default answers, watching)', type: 'model' },
     { k: 'models.main', label: 'Strong model (hand-offs, error checks)', type: 'model' },
     { k: 'models.deep', label: 'Deepest model (hardest problems, app changes)', type: 'model', hint: 'Prices are US dollars per million tokens, input / output.' },
@@ -166,7 +168,7 @@ export class SettingsUI {
     const el = document.getElementById('costBreakdown');
     if (!el) return;
     const s = meter.stats();
-    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', title: 'Session titles and summaries', find: 'Session search', code: 'App changes' };
+    const NAMES = { answer: 'Your questions', watch: 'Live / Quiet live looks', verify: 'Double-checks of suspected errors (strong model)', title: 'Session titles and summaries', find: 'Session search', search: 'Web searches (fee per search)', code: 'App changes' };
     const rows = (by, total) => {
       const list = Object.entries(by || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
       if (!list.length) return '<div class="muted">Nothing yet.</div>';
