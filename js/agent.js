@@ -76,6 +76,7 @@ Understanding the board
 - The user's current selection (a box, or a freehand lasso outline) is given in board_context.selection, and a second image shows it close up; with a lasso, everything outside the outline is faded. "This" usually means what they selected.
 - board_context.recent_writing (when there is no selection): where the user was writing most recently and how long ago, in pixels of the first image, sometimes with a close-up as the second image. Unless the question names something else, "this", "here", "the last line", "what I just wrote" and an unspecific "is this right?" usually mean that area. It is a hint, not a limit: anything the question names elsewhere on the page wins.
 - board_context.board_map is your own running picture of this page, kept while watching: its areas (what each part is for, what builds on what, where it is in the first image), the user's apparent goal, open points, remarks you made while watching (said, held for a pause, or kept for when asked) and remarks the user dismissed. Use it to understand how the page fits together; when asked "anything else?" or "what do you think?", the remarks kept for later are what you noticed. Don't repeat dismissed remarks.
+- When the user asks to go to / scroll to / be taken to / be shown a place ("where I wrote the Lagrangian", "the start of the page", "your derivation", "the boxed result on page 3"), call show_place with that place's box. Find it from the image, your notes, the board map and your blocks; for another page call view_page (without go) first and use its image. Reply in one short line.
 - If something is too small or messy to read, call get_region for a sharper view.
 - Speech-to-text garbles math words ("curls" for curl, "dell" for del, "partial tea" for partial t); interpret charitably.
 
@@ -90,6 +91,7 @@ Answering
 - Use search_library and show_page for the user's PDFs (the shared library plus this session's own materials).
 - ${s.webSearch ? 'web_search: when the user asks you to look something up (a paper, an arXiv preprint, a reference, a current value), search as much as it takes to find it. Without being asked, search only when the question needs current or outside facts (a recent measurement, a specific paper\'s result, a convention in a named source); never for textbook physics or derivations. Your citations are listed as sources under the answer automatically.' : 'Web search is turned off in settings: if a question needs it, say so.'}
 - A notebook can be made from a PDF: then a page may have a PDF page as its background (board_context.pdf_page: its printed text and where it is). The user writes on top; you never change the PDF. Blank pages may sit between PDF pages.
+- To take the user somewhere on the board ("go to", "show me", "take me to", "zoom into" something they or you wrote, the top of the page, the first thing written…), call show_area with the box around it in the page image (another notebook page: view_page with go:true first). Moving the view doesn't change the page.
 - The session may have several pages; you see only the current one. board_context.other_pages lists the others (their notes and your blocks, as text). When a question needs another page ("look at page 3", "use the result from earlier", "compare with page 2"), call view_page for it. Use go:true only when the user asks to go to / open / show that page.
 - Work is organised in sessions. To bring something from another session ("the boundary conditions from yesterday"), call list_sessions, then read_session, then write it here.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
@@ -226,7 +228,7 @@ export class Agent {
       page: page.name,
       session_type: b.layout ? `notebook${b.layout.pdf ? ' from a PDF' : ''}: page ${b.pi + 1} of ${b.pages.length}, ${b.page.bg ? `PDF page ${b.page.bg.page} as background` : b.layout.pdf ? `a blank ${b.layout.size} page added between PDF pages` : `${b.layout.size} ${b.layout.orient}`}; the image shows the page. Board writing stays on the page; what doesn't fit continues on the next page.` : 'freeform (an endless page)',
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
-      image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
+      image: { width: snap.width, height: snap.height, covers: snap.partial ? 'only the part of this big page that is on screen now (view_page for this page shows all of it)' : 'everything on this page', note: 'All x,y for tools are pixels in the FIRST image.' },
       recent_writing: recent || undefined,
       // what watching has built up: the map of the page and the remarks it made (one shared memory)
       board_map: awarenessForQuestion(b, page, snap),
@@ -486,6 +488,7 @@ export class Agent {
     try {
       const blk = await b.addBlock({ lines, x: pos.x, y: pos.y, fontPx, color: style.color, strokePx: style.strokePx }, { animateMs: settings.writeAnimationMs });
       await b.keepOnPage(blk);
+      await b.animationsDone();
     } finally {
       b.setLocked(false);
     }

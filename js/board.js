@@ -341,7 +341,7 @@ export class Board {
     const keep = this.page.id;
     this.pages.splice(i, 1);
     if (!this.pages.length) this.newPage(); // a session always keeps one page
-    this.backStack = (this.backStack || []).filter((id) => this.pages.some((p) => p.id === id));
+    this.backStack = (this.backStack || []).filter((e) => this.pages.some((p) => p.id === (e.id ?? e)));
     this.pagesChanged(keep);
   }
 
@@ -362,6 +362,48 @@ export class Board {
     return p.starred;
   }
 
+  // Claude moving the view to a place on the board ("take me to where I wrote the Lagrangian"): `rect` in board
+  // units on page `i` (default: this page). zoom: 'close' fills the screen with it, 'normal' shows it with some
+  // surroundings, 'whole' shows everything (the whole notebook page / everything written). Remembered for Back.
+  focusOn(rect, { page = this.pi, zoom = 'normal' } = {}) {
+    if (!this.pages[page]) return false;
+    (this.backStack ||= []).push({ id: this.page.id, view: { ...this.page.view } });
+    if (this.backStack.length > 20) this.backStack.shift();
+    if (page !== this.pi) this.goto(page);
+    const v = this.page.view;
+    let r = rect;
+    if (zoom === 'whole' || !r) r = this.layout ? this.pageRect() : this.contentBounds() || this.visibleWorld();
+    const margin = zoom === 'close' ? 0.08 : zoom === 'whole' ? 0.04 : 0.3; // share of the screen left around it
+    const W = this.w * (1 - 2 * margin), H = this.h * (1 - 2 * margin);
+    let z = Math.min(W / Math.max(r.w, 1), H / Math.max(r.h, 1));
+    z = Math.max(this.layout ? this.fitZoom() : 0.2, Math.min(zoom === 'close' ? 4 : 2.2, z));
+    if (zoom === 'normal') z = Math.min(z, Math.max(v.z, this.layout ? this.fitZoom() * 1.6 : 1.2)); // not closer than needed
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    const target = { z, ox: this.w / 2 - cx * z, oy: this.h / 2 - cy * z };
+    // a tall target: start at its top rather than its middle
+    if (r.h * z > this.h * 0.9) target.oy = this.h * 0.06 - r.y * z;
+    this.glideTo(target);
+    emit('page', { page: this.page, index: this.pi, count: this.pages.length });
+    return true;
+  }
+
+  // moves the view smoothly to { z, ox, oy } (notebook: kept on the page)
+  glideTo(to) {
+    const v = this.page.view, from = { ...v }, t0 = performance.now(), ms = 380;
+    cancelAnimationFrame(this.glideRaf);
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+      v.z = from.z + (to.z - from.z) * e;
+      v.ox = from.ox + (to.ox - from.ox) * e;
+      v.oy = from.oy + (to.oy - from.oy) * e;
+      if (k >= 1) this.clampView();
+      this.render();
+      if (k < 1) this.glideRaf = requestAnimationFrame(step);
+      else { this.prepareNeighbours?.(); this.saveSoon(); }
+    };
+    this.glideRaf = requestAnimationFrame(step);
+  }
+
   // A jump (overview, page number, search, Claude) remembers where you were, for the Back button.
   // Swiping to the next page is not a jump.
   jumpTo(i, { remember = true } = {}) {
@@ -371,10 +413,20 @@ export class Board {
     else this.goto(i);
   }
 
+  // Back: to the page (and, after Claude moved the view, the exact spot and zoom) you were at before the jump.
+  // Entries are page ids, or { id, view } for a spot on a page.
   goBack() {
     while (this.backStack?.length) {
-      const i = this.pages.findIndex((p) => p.id === this.backStack.pop());
-      if (i >= 0 && i !== this.pi) { this.goto(i); return true; }
+      const e = this.backStack.pop();
+      const i = this.pages.findIndex((p) => p.id === (e.id ?? e));
+      if (i < 0) continue;
+      if (e.view) {
+        if (i !== this.pi) this.goto(i, { view: e.view });
+        else this.glideTo(e.view);
+        emit('page', { page: this.page, index: this.pi, count: this.pages.length });
+        return true;
+      }
+      if (i !== this.pi) { this.goto(i); return true; }
     }
     emit('page', { page: this.page, index: this.pi, count: this.pages.length });
     return false;
@@ -627,9 +679,12 @@ export class Board {
     for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + 20); }
     for (const x of next.blocks) bottom = Math.max(bottom, x.y + (x.h || 0) + 20);
     rest.y = bottom;
+    const anim = this.anims?.get(b.id);
+    if (anim) await this.animationsDone(); // finish writing on this page before turning to the next
     next.blocks.push(rest);
     this.goto(from + 1);
     if (rest !== b) { await this.layoutBlock(rest); this.pushUndo({ add: { blocks: [rest] } }); }
+    if (anim) this.animate(rest, anim.per, anim.signal);
     this.markDirty({ x: rest.x, y: rest.y, w: rest.w || 0, h: rest.h || 0 }, { ai: rest.author !== 'user' });
     this.saveSoon();
     const more = await this.keepOnPage(rest); // it may need yet another page
@@ -1570,6 +1625,77 @@ export class Board {
     return p;
   }
 
+  // ---------- writing animation (Settings → Board: style and time per line) ----------
+  // Each line (row) of a block appears in turn: "write" draws it left to right like a pen, "fade" fades it in,
+  // "lines" shows it at once; "off" shows the whole block at once. Only on screen: pictures for Claude,
+  // thumbnails and exports always show the whole block. The whole block takes at most about 15 s.
+  animate(b, perMs, signal) {
+    const style = settings.writeAnimation || 'write';
+    const lay = this.layouts.get(b.id);
+    if (style === 'off' || !lay?.items.length || !(perMs > 0)) return;
+    const n = lay.items.length;
+    const per = Math.max(60, Math.min(perMs, 15000 / n));
+    (this.anims ||= new Map()).set(b.id, { t0: performance.now(), per, style, n, signal });
+    if (!this.animRaf) this.animRaf = requestAnimationFrame(() => this.animTick());
+  }
+
+  animTick() {
+    this.animRaf = null;
+    const now = performance.now();
+    for (const [id, a] of this.anims || []) {
+      if (a.signal?.aborted || now - a.t0 > a.n * a.per + 50) { this.anims.delete(id); continue; }
+      // keep the line being written in view (freeform: scroll along; notebook pages are shown whole)
+      const b = this.page?.blocks.find((x) => x.id === id), lay = b && this.layouts.get(id);
+      const i = Math.min(a.n - 1, Math.floor((now - a.t0) / a.per));
+      if (b && lay && !this.layout && i !== a.shown) { a.shown = i; const it = lay.items[i]; if (it) this.ensureVisible({ x: b.x + it.x, y: b.y + it.y, w: it.w, h: it.h + 40 }); }
+    }
+    this.render();
+    if (this.anims?.size) this.animRaf = requestAnimationFrame(() => this.animTick());
+    else for (const f of this.animWaiters?.splice(0) || []) f();
+  }
+
+  // resolves when every writing animation has finished (or was stopped)
+  animationsDone() {
+    if (!this.anims?.size) return Promise.resolve();
+    return new Promise((res) => (this.animWaiters ||= []).push(res));
+  }
+
+  // ---------- taking you to a place ("go to where I wrote Maxwell's equations") ----------
+  // Glides the view so the place (board units) is in the middle of the screen, zoomed in on it if asked
+  // (or if it doesn't fit), and outlines it for a moment so you see what was meant.
+  showPlace(rect, { zoom = false } = {}) {
+    const v = this.page.view, m = 40;
+    let z = v.z;
+    const fitsZ = Math.min((this.w - 2 * m) / Math.max(rect.w, 1), (this.h - 2 * m) / Math.max(rect.h, 1));
+    if (zoom) z = Math.min(3, fitsZ * 0.85);
+    else if (rect.w * z > this.w - 2 * m || rect.h * z > this.h - 2 * m) z = Math.min(z, fitsZ); // make it fit
+    if (this.layout) z = Math.max(z, this.fitZoom());
+    z = Math.max(0.2, Math.min(6, z));
+    const cx = rect.x + rect.w / 2;
+    // centred; a place taller than the screen starts at its top
+    const oy = rect.h * z > this.h - 2 * m ? m - rect.y * z : this.h / 2 - (rect.y + rect.h / 2) * z;
+    const target = { z, ox: this.w / 2 - cx * z, oy };
+    // where clampView would put it (notebook pages can't be pushed off screen)
+    const save = { ...v };
+    Object.assign(v, target); this.clampView(); const end = { ...v }; Object.assign(v, save);
+    const t0 = performance.now(), ms = 380, from = { ...v };
+    cancelAnimationFrame(this.placeRaf);
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+      // zoom changes smoothly in log space, the position follows
+      v.z = from.z * Math.pow(end.z / from.z, e);
+      v.ox = from.ox + (end.ox - from.ox) * e;
+      v.oy = from.oy + (end.oy - from.oy) * e;
+      this.render();
+      if (k < 1) this.placeRaf = requestAnimationFrame(step);
+      else { this.clampView(); this.render(); this.saveSoon(); }
+    };
+    this.placeRaf = requestAnimationFrame(step);
+    this.flash = { rect, until: performance.now() + 2200 };
+    const pulse = () => { this.renderLive(); if (this.flash && performance.now() < this.flash.until) requestAnimationFrame(pulse); else { this.flash = null; this.renderLive(); } };
+    requestAnimationFrame(pulse);
+  }
+
   // Where Claude may write: a notebook page minus its margins; on a freeform page, the part of the board you can
   // see now (e.g. half the screen when the panel takes the other half), minus a margin.
   writeArea() {
@@ -1592,18 +1718,11 @@ export class Board {
     const b = { id: uid(), kind, x, y, lines: [], color: color || settings.aiColor, fontPx, strokePx, author, src, w, h };
     if (kind !== 'image') this.fitToArea(b);
     this.page.blocks.push(b);
-    if (kind === 'math' && animateMs > 0 && lines.length > 1) {
-      for (const ln of lines) {
-        if (signal?.aborted) break;
-        b.lines.push(ln);
-        await this.layoutBlock(b);
-        this.ensureVisible({ x: b.x, y: b.y, w: b.w, h: b.h });
-        await sleep(animateMs);
-      }
-    } else {
-      b.lines = [...lines];
-      await this.layoutBlock(b);
-    }
+    b.lines = [...lines];
+    const anim = kind !== 'image' && animateMs > 0 && settings.writeAnimation !== 'off';
+    if (anim) (this.unready ||= new Set()).add(b.id); // not shown until typeset, so the animation starts from nothing
+    try { await this.layoutBlock(b); } finally { this.unready?.delete(b.id); }
+    if (anim) this.animate(b, animateMs, signal); // plays while the caller carries on // plays while the caller carries on
     this.pushUndo({ add: { blocks: [b] } });
     this.ensureVisible({ x: b.x, y: b.y, w: b.w || 100, h: b.h || 40 });
     this.saveSoon();
@@ -1669,7 +1788,8 @@ export class Board {
   // ---------- snapshots ----------
   // Renders (part of) the page to a JPEG for Claude. Returns mapping info so image pixels can be
   // converted back to board coordinates.
-  snapshot({ region = null, maxDim = 1400, maxScale = 2, pad = 30 } = {}) {
+  // whole: always the whole page (a big freeform page otherwise shows only what is on screen, to stay legible)
+  snapshot({ region = null, maxDim = 1400, maxScale = 2, pad = 30, whole = false } = {}) {
     let bb = region || this.contentBounds() || (this.layout ? this.pageRect() : this.visibleWorld());
     if (this.layout && !region) {
       // what is on the page (writing off the page's edge is not part of it)
@@ -1679,10 +1799,12 @@ export class Board {
     }
     bb = { x: bb.x - pad, y: bb.y - pad, w: bb.w + 2 * pad, h: bb.h + 2 * pad };
     let scale = Math.min(maxScale, maxDim / Math.max(bb.w, bb.h));
-    if (!region && scale < 0.5) {
+    let partial = false;
+    if (!region && !whole && scale < 0.5) {
       const vis = this.visibleWorld();
       bb = { x: vis.x, y: vis.y, w: vis.w, h: vis.h };
       scale = Math.min(maxScale, maxDim / Math.max(bb.w, bb.h));
+      partial = true;
     }
     const W = Math.max(8, Math.round(bb.w * scale));
     const H = Math.max(8, Math.round(bb.h * scale));
@@ -1725,7 +1847,7 @@ export class Board {
       this.noImageBlocks = false;
       data = cv2.toDataURL('image/jpeg', 0.85);
     }
-    return { b64: data.split(',')[1], dataUrl: data, media_type: 'image/jpeg', bounds: bb, scale, width: W, height: H };
+    return { b64: data.split(',')[1], dataUrl: data, media_type: 'image/jpeg', bounds: bb, scale, width: W, height: H, partial };
   }
 
   imageToWorld(snap, px, py) {
@@ -1942,6 +2064,23 @@ export class Board {
       }
       ctx.restore();
     }
+    if (this.flash) {
+      // the place Claude just took you to: a soft outline that fades out
+      const f = this.flash, left = (f.until - performance.now()) / 2200;
+      if (left > 0) {
+        const pad = 10 / view.z;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, left * 2);
+        ctx.lineWidth = 3 / view.z;
+        ctx.strokeStyle = '#1a5fd0';
+        ctx.fillStyle = 'rgba(26,95,208,0.08)';
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(f.rect.x - pad, f.rect.y - pad, f.rect.w + 2 * pad, f.rect.h + 2 * pad, 10 / view.z) : ctx.rect(f.rect.x - pad, f.rect.y - pad, f.rect.w + 2 * pad, f.rect.h + 2 * pad);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
     if (settings.showMarks) for (const m of this.page.marks) drawMark(ctx, m, view.z);
     if (this.tool === 'eraser' && this.eraserCursor) {
       const ec = this.eraserCursor;
@@ -2028,10 +2167,15 @@ export class Board {
   }
 
   drawBlock(ctx, b) {
+    if (ctx === this.ctx && this.unready?.has(b.id)) return;
     const lay = this.layouts.get(b.id);
     if (b.kind !== 'image' && settings.aiSideBar !== false) {
       ctx.fillStyle = b.color + '55';
-      ctx.fillRect(b.x - 9, b.y, 2.5, b.h || 24);
+      // while it is being written, the side bar grows with the lines
+      const an = ctx === this.ctx && this.anims?.get(b.id), its = an && this.layouts.get(b.id)?.items;
+      let bh = b.h || 24;
+      if (its?.length) { const i = Math.min(its.length - 1, Math.floor((performance.now() - an.t0) / an.per)); bh = Math.min(bh, its[i].y + its[i].h); }
+      ctx.fillRect(b.x - 9, b.y, 2.5, bh);
     }
     if (!lay || (this.noImageBlocks && b.kind !== 'image')) {
       ctx.fillStyle = b.color || '#1a5fd0';
@@ -2058,7 +2202,25 @@ export class Board {
   }
 
   drawItems(ctx, b, lay) {
-    for (const it of lay.items) {
+    const an = ctx === this.ctx && this.anims?.get(b.id);
+    const now = an ? performance.now() : 0;
+    for (const [i, it] of lay.items.entries()) {
+      let restore = false;
+      if (an) {
+        const p = Math.max(0, Math.min(1, (now - an.t0 - i * an.per) / an.per));
+        if (p <= 0) break; // not written yet (nor anything after it)
+        if (p < 1 && an.style === 'fade') { ctx.save(); ctx.globalAlpha = p; restore = true; }
+        else if (p < 1 && an.style === 'write') {
+          const e = 1 - Math.pow(1 - p, 1.6); // a pen slows down slightly towards the end of a line
+          ctx.save(); ctx.beginPath(); ctx.rect(b.x + it.x - 2, b.y + it.y - 4, (it.w + 4) * e, it.h + 8); ctx.clip(); restore = true;
+        }
+      }
+      try { this.drawItem(ctx, b, it); } finally { if (restore) ctx.restore(); }
+    }
+  }
+
+  drawItem(ctx, b, it) {
+    {
       if (it.img) {
         try { ctx.drawImage(it.img, b.x + it.x, b.y + it.y, it.w, it.h); } catch {}
       } else {

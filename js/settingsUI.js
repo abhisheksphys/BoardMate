@@ -51,7 +51,8 @@ const SECTIONS = [
     { k: 'aiWeightManual', label: 'Stroke width (same units as Pen width; 0 = normal type)', type: 'number', step: 0.2, when: ['aiWeightMode', 'manual'] },
     { k: 'aiColorMode', label: "Claude's colour", type: 'select', options: [['manual', 'Manual: a colour I pick'], ['mimic', 'Mimic: the ink colour I write in there']] },
     { k: 'aiColor', label: 'Colour', type: 'color', when: ['aiColorMode', 'manual'] },
-    { k: 'writeAnimationMs', label: 'Delay between written lines (ms)', type: 'number' },
+    { k: 'writeAnimation', label: 'How Claude\'s writing appears', type: 'select', options: [['write', 'Written: each line drawn left to right, like a pen'], ['fade', 'Fade in: line by line'], ['lines', 'Line by line: each line appears at once'], ['off', 'Off: the whole block at once']] },
+    { k: 'writeAnimationMs', label: 'Time per line, in ms (smaller = faster; a whole block takes at most about 15 s)', type: 'number', step: 50, when: ['writeAnimation', 'write|fade|lines'] },
     { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
     { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
     { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },
@@ -255,7 +256,7 @@ export class SettingsUI {
   applyWhen() {
     this.dlg.querySelectorAll('.when').forEach((el) => {
       const ctl = document.getElementById(el.dataset.when);
-      el.hidden = !!ctl && ctl.value !== el.dataset.is;
+      el.hidden = !!ctl && !el.dataset.is.split('|').includes(ctl.value);
     });
   }
 

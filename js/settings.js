@@ -58,7 +58,8 @@ export const DEFAULTS = {
 
   // Board
   allowBoardWrite: true,
-  writeAnimationMs: 200,
+  writeAnimation: 'write', // write (each line drawn left to right) | fade | lines (one at a time) | off
+  writeAnimationMs: 350, // time per line
   // How Claude's writing looks. Each: 'mimic' (from your writing where it goes) or 'manual' (a set value).
   aiSizeMode: 'mimic',
   aiSizeScale: 1, // mimic: × your handwriting where it writes (1 = same, 1.2 = a bit larger)
@@ -110,7 +111,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'writeStyle', 'textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'markTap', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
+  'allowBoardWrite', 'writeAnimation', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 

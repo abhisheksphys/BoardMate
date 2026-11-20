@@ -42,9 +42,26 @@ export const TOOL_SCHEMAS = [
     },
   },
   {
+    name: 'show_area',
+    description:
+      'Move the user\'s view to a place on the board when they ask to go to / show / take them to something: "where I wrote the Lagrangian", "your derivation of the wave equation", "the top of the page", "the first thing I wrote", "zoom into that integral". ' +
+      'Say where it is in one of these ways: block = the id of one of your blocks (your_board_blocks); area = the name of a board_map area; note = the key of one of your notebook notes; or x,y,w,h = the box around it in pixels of the latest page image (it may lie outside the image: on a big freeform page the image can show only part of it, and positions in board_context are in the same pixels). ' +
+      'If it is on another page of a notebook, first call view_page with go:true, then call this with a box in that page\'s image. ' +
+      'zoom: "normal" (it with some surroundings; default), "close" (fill the screen with it), "whole" (the whole page / everything written; no box needed). The user can tap Back to return.',
+    input_schema: {
+      type: 'object',
+      properties: { block: { type: 'string' }, area: { type: 'string' }, note: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' }, zoom: { type: 'string', enum: ['normal', 'close', 'whole'] } },
+    },
+  },
+  {
     name: 'resize_board_block',
     description: "Make one of your blocks on the board (or an image) bigger or smaller, e.g. when the user says \"make that bigger\". id from your_board_blocks; scale e.g. 1.25 or 0.8.",
     input_schema: { type: 'object', properties: { id: { type: 'string' }, scale: { type: 'number' } }, required: ['id', 'scale'] },
+  },
+  {
+    name: 'show_place',
+    description: "Take the user to a place on the board when they ask to go / scroll / take me to / show me something (\"where I wrote the Lagrangian\", \"the start of the page\", \"your derivation of the wave equation\", \"the boxed result on page 3\"). The view glides there and the place is outlined for a moment. x,y,w,h = the place in pixels of the FIRST image of this turn (the current page), or, with `page`, in pixels of the image view_page returned for that page (call view_page first; it also works for the current page when the first image shows only part of a big page: see board_context.image.covers). Use your notes, board_map and blocks to find it. zoom:true zooms in on it (when they want to see it closely); otherwise the zoom stays unless the place doesn't fit.",
+    input_schema: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' }, page: { type: 'integer', description: '1-based; only for a place on another page, or in a view_page image' }, zoom: { type: 'boolean' } }, required: ['x', 'y', 'w', 'h'] },
   },
   {
     name: 'view_page',
@@ -221,6 +238,7 @@ export async function runTool(use, ctx) {
         try {
           const blk = await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx, color: style.color, strokePx: style.strokePx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
           moved = await board.keepOnPage(blk); // notebook: stay on the page, or continue on the next one
+          await board.animationsDone(); // the writing animation plays to the end before Claude goes on
         } finally {
           board.setLocked(false);
         }
@@ -243,9 +261,10 @@ export async function runTool(use, ctx) {
         if (inp.go) {
           board.jumpTo(i); // remembered, so the user can tap Back
           await new Promise((r) => setTimeout(r, 50));
-          ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5 }));
+          ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5, whole: true }));
           agent.lastSnap = shot; // tools now work on this page
-        } else ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5 }));
+        } else ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5, whole: true }));
+        (agent.pageShots ||= new Map()).set(page.id, shot); // for show_place on that page
         const blank = !page.bg && !page.strokes.length && !page.blocks.length;
         const info = {
           page: i + 1,
@@ -260,6 +279,39 @@ export async function runTool(use, ctx) {
         }
         const note = inp.go ? 'The board now shows this page; x,y in this image are valid for annotate and write_on_canvas.' : 'For reading only: the user is still on their own page, so do not use x,y from this image with annotate or write_on_canvas.';
         return ok(use.id, [...(blank ? [] : [imageBlock(shot)]), { type: 'text', text: `${blank ? 'This page is empty. ' : ''}${note}\n${JSON.stringify(info)}` }]);
+      }
+
+      case 'show_place': {
+        const has = ['x', 'y', 'w', 'h'].every((k) => Number.isFinite(Number(inp[k])));
+        if (!has) return fail(use.id, 'Give x, y, w, h of the place.');
+        const i = Number.isFinite(Number(inp.page)) ? Math.round(Number(inp.page)) - 1 : board.pi;
+        const target = board.pages[i];
+        if (!target) return fail(use.id, `There is no page ${inp.page}; this session has ${board.pages.length} page(s).`);
+        const img = (Number.isFinite(Number(inp.page)) && agent.pageShots?.get(target.id)) || (i === board.pi ? snap : null);
+        if (!img) return fail(use.id, `Call view_page for page ${i + 1} first, then give the place in pixels of that image.`);
+        const a = board.imageToWorld(img, Number(inp.x), Number(inp.y));
+        const rect = { x: a.x, y: a.y, w: Math.max(4, Number(inp.w) / img.scale), h: Math.max(4, Number(inp.h) / img.scale) };
+        if (i !== board.pi) { board.jumpTo(i); await new Promise((r) => setTimeout(r, 60)); }
+        board.showPlace(rect, { zoom: !!inp.zoom });
+        return ok(use.id, `Showing it${i !== board.pi ? '' : ''}: the user's view is now on that place${inp.zoom ? ', zoomed in' : ''} (page ${i + 1}). Coordinates in your images are unchanged.`);
+      }
+
+      case 'show_area': {
+        const zoom = inp.zoom || 'normal';
+        let rect = null;
+        const P = board.page;
+        if (inp.block) { const k = P.blocks.find((x) => x.id === inp.block); if (k) rect = { x: k.x, y: k.y, w: k.w || 100, h: k.h || 40 }; }
+        if (!rect && inp.area) { const q = String(inp.area).toLowerCase(); const a = (P.map?.areas || []).find((x) => x.id === inp.area || String(x.name).toLowerCase() === q) || (P.map?.areas || []).find((x) => String(x.name).toLowerCase().includes(q)); if (a) rect = { x: a.x, y: a.y, w: a.w, h: a.h }; }
+        if (!rect && inp.note) { const e = (P.notebook || []).find((x) => x.key === inp.note); if (e && Number.isFinite(e.x)) rect = { x: e.x - 10, y: e.y - 30, w: 360, h: 80 }; }
+        if ((inp.block || inp.area || inp.note) && !rect && ![inp.x, inp.y, inp.w, inp.h].every(Number.isFinite)) return fail(use.id, 'Could not find that block / area / note on this page; give x,y,w,h instead.');
+        if (!rect && zoom !== 'whole') {
+          if (!snap) return fail(use.id, 'No page image yet.');
+          if (![inp.x, inp.y, inp.w, inp.h].every(Number.isFinite)) return fail(use.id, 'Give x, y, w, h (pixels of the latest page image), or zoom "whole".');
+          const a = board.imageToWorld(snap, inp.x, inp.y);
+          rect = { x: a.x, y: a.y, w: Math.max(20, inp.w / snap.scale), h: Math.max(20, inp.h / snap.scale) };
+        }
+        board.focusOn(rect, { zoom });
+        return ok(use.id, `The view now shows that ${zoom === 'whole' ? 'whole page' : 'place'}; the user can tap Back to return. Say in a few words what is there, if useful.`);
       }
 
       case 'set_page_paper':

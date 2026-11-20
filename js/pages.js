@@ -75,10 +75,14 @@ export class PageNav {
     star.title = b.page.starred ? 'Starred: tap to remove the bookmark' : 'Bookmark this page';
     // Back: to the page before your last jump
     const stack = b.backStack || [];
-    let target = -1;
-    for (let k = stack.length - 1; k >= 0 && target < 0; k--) { const i = b.pages.findIndex((p) => p.id === stack[k]); if (i >= 0 && i !== b.pi) target = i; }
+    let target = -1, spot = false;
+    for (let k = stack.length - 1; k >= 0 && target < 0; k--) {
+      const e = stack[k], i = b.pages.findIndex((p) => p.id === (e.id ?? e));
+      if (i >= 0 && (i !== b.pi || e.view)) { target = i; spot = !!e.view && i === b.pi; }
+    }
     $('#pageBackBtn').hidden = target < 0;
-    if (target >= 0) $('#pageBackBtn').textContent = `← Page ${target + 1}`;
+    if (target >= 0) $('#pageBackBtn').textContent = spot ? '← Back' : `← Page ${target + 1}`;
+    if (target >= 0) $('#pageBadge').hidden = false; // Back is there even on a single freeform page
     if (this.dlg.open) this.render();
   }
 
