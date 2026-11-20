@@ -117,7 +117,8 @@ function updateMic() {
   mic.disabled = !voice.supported || settings.voiceIn === 'off';
 }
 mic.addEventListener('pointerdown', (e) => {
-  voice.unlock();
+  // Don't unlock speech output here: on iOS that switches audio to playback just as listening starts,
+  // and the mic then hears nothing for a while. It is unlocked on any other tap, or just after listening is up.
   if (settings.voiceIn === 'push') { e.preventDefault(); mic.setPointerCapture(e.pointerId); voice.pushStart(); mic.classList.add('on'); }
 });
 const endPush = () => { if (settings.voiceIn === 'push' && voice.listening) voice.pushEnd(); };
@@ -126,14 +127,40 @@ mic.addEventListener('pointercancel', endPush);
 mic.addEventListener('click', () => { if (settings.voiceIn === 'continuous') voice.toggleContinuous(); });
 on('mic', updateMic);
 on('utterance', (text) => askFrom(text, 'voice'));
+// The speech bar: what you're saying, live. In "send manually" mode it keeps everything you say
+// until you tap ↑ (send), ✎ (edit in the chat box first) or ✕ (discard).
 on('interim', (t) => {
   const el = $('#interim');
   el.hidden = !t;
-  el.textContent = t;
+  el.classList.toggle('manual', settings.voiceSend === 'manual');
+  el.querySelector('.interim-text').textContent = t;
+});
+$('#interimSend').addEventListener('click', () => voice.sendNow());
+$('#interimClear').addEventListener('click', () => voice.discardHeard());
+$('#interimEdit').addEventListener('click', () => {
+  const t = voice.takeHeard();
+  if (!t) return;
+  if (settings.panelPosition === 'hidden') setSettings({ panelPosition: 'right' });
+  const input = $('#input');
+  input.value = input.value ? `${input.value} ${t}` : t;
+  input.dispatchEvent(new Event('input'));
+  input.focus();
 });
 on('voice-error', (m) => panel.add('error', m));
+// Visible proof that the mic is actually listening, and optional step-by-step diagnostics.
+on('mic', (st) => {
+  if (agent.busy) return;
+  panel.status(st.listening ? (st.ready ? '🎙 Listening…' : '🎙 Starting the mic…') : st.want ? '🎙 Restarting…' : '');
+});
+on('voice-debug', (m) => panel.add('info', `🎙 ${m}`, { noLog: true }));
 on('speaking', (v) => $('#voiceOutBtn').classList.toggle('speaking', v));
-document.addEventListener('pointerdown', () => voice.unlock(), { once: true });
+// Unlock speech output (iOS needs a tap for that) on the first tap that isn't the mic.
+const unlockOnTap = (e) => {
+  if (e.target.closest?.('#micBtn')) return;
+  voice.unlock();
+  document.removeEventListener('pointerdown', unlockOnTap, true);
+};
+document.addEventListener('pointerdown', unlockOnTap, true);
 
 // ---------- board events ----------
 on('lock', (v) => { $('#aiChip').hidden = !v; });

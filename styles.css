@@ -260,13 +260,23 @@ body.panel-float #panelHead { cursor: move; }
   right: 16px;
   bottom: 16px;
   z-index: 10;
-  background: rgba(29, 29, 31, 0.86);
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  background: rgba(29, 29, 31, 0.88);
   color: #fff;
-  border-radius: 12px;
-  padding: 10px 14px;
+  border-radius: 14px;
+  padding: 10px 10px 10px 16px;
   font-size: 15px;
   pointer-events: none;
 }
+#interim .interim-text { flex: 1; align-self: center; max-height: 30vh; overflow-y: auto; }
+#interim .interim-actions { display: none; gap: 6px; flex: none; }
+#interim.manual { pointer-events: auto; }
+#interim.manual .interim-actions { display: flex; }
+#interim .interim-actions button { width: 36px; height: 36px; border-radius: 50%; padding: 0; color: #fff; background: rgba(255, 255, 255, 0.14); font-size: 15px; display: flex; align-items: center; justify-content: center; }
+#interim #interimSend { background: #fff; color: var(--ink); }
+#interim #interimSend svg { width: 18px; height: 18px; stroke-width: 2.4; }
 #interim[hidden] { display: none; }
 
 @keyframes pulse { 50% { opacity: 0.3; } }
@@ -375,3 +385,12 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.35); }
 #errBar[hidden] { display: none; }
 #errBar span { flex: 1; }
 #errBar button { border: 1px solid #f3c2bc; background: #fff; padding: 4px 10px; color: #8a1c13; }
+
+/* panel header: the status ("Listening…", "Thinking…") gets its own line under the header, only when there is one */
+#panelHead { flex-wrap: wrap; row-gap: 4px; }
+#panelHead #status { order: 10; flex: 1 0 100%; font-size: 13px; }
+#panelHead #status:empty { display: none; }
+#panelHead #matBtn { margin-left: auto; }
+#panelHead > * { flex-shrink: 0; }
+#panelHead #status { flex-shrink: 1; }
+#clearChat svg { width: 18px; height: 18px; }

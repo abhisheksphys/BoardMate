@@ -30,6 +30,9 @@ export const DEFAULTS = {
   voiceIn: 'push', // off | push | continuous
   wakeWord: '',
   headphones: false, // true = keep listening while AI speaks (enables barge-in)
+  voiceSend: 'auto', // auto = send after a pause | manual = wait for the ↑ button in the speech bar
+  voiceSendDelaySec: 1.4, // auto mode: seconds of silence before sending
+  voiceDebug: false, // show what speech recognition is doing in the panel status line
   voiceOut: true,
   voiceName: '',
   speechRate: 1.05,
@@ -72,7 +75,7 @@ export const DEFAULTS = {
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'liveSpeak',
-  'voiceIn', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
+  'voiceIn', 'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimationMs', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];

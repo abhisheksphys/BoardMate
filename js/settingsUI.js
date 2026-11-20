@@ -23,11 +23,14 @@ const SECTIONS = [
   ]],
   ['Voice', [
     { k: 'voiceIn', label: 'Voice input', type: 'select', options: [['push', 'Hold mic to talk'], ['continuous', 'Always listening (tap mic to start/stop)'], ['off', 'Off']] },
+    { k: 'voiceSend', label: 'Sending what you say', type: 'select', options: [['auto', 'Automatically, after I stop speaking'], ['manual', 'When I tap ↑ in the speech bar']] },
+    { k: 'voiceSendDelaySec', label: 'Automatic sending: seconds of silence before it sends (e.g. 1.5; longer gives you time to think)', type: 'number', step: 0.5 },
     { k: 'wakeWord', label: 'Wake word (always-listening only; empty = everything you say)' },
     { k: 'headphones', label: 'Using headphones (keep listening while Claude talks; lets you interrupt)', type: 'checkbox' },
     { k: 'voiceOut', label: 'Spoken replies', type: 'checkbox' },
     { k: 'narration', label: 'Narrate actions ("done, it is on the board")', type: 'checkbox' },
     { k: 'voiceName', label: 'Voice', type: 'voice' },
+    { k: 'voiceDebug', label: 'Show voice diagnostics (what Safari hears, step by step) — for troubleshooting', type: 'checkbox' },
     { k: 'speechRate', label: 'Speech rate', type: 'number', step: 0.05 },
   ]],
   ['Board', [
