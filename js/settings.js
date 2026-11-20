@@ -54,6 +54,8 @@ export const DEFAULTS = {
   inkPrediction: true, // draw a few milliseconds ahead of the Pencil tip where the browser supports it
   eraserSize: 20, // diameter in on-screen pixels
   eraserMode: 'partial', // partial = erase only what the circle touches | stroke = remove whole strokes
+  paper: 'dots', // plain | dots | ruled | grid: for new pages, and pages that haven't picked their own
+  paperSpacing: 40, // distance between lines or dots
   fingerDraws: false,
   showMarks: true,
 
@@ -71,6 +73,10 @@ export const DEFAULTS = {
     { name: 'Explain this page', prompt: 'Explain what I have written on this page.' },
   ],
 
+  // Backup to a private GitHub repository (uses the GitHub token from Self-update)
+  backupRepo: '', // repo name (same owner) or owner/name; must be private
+  backupAuto: true, // back up by itself when something changed (at most every 10 minutes)
+
   // Self-update
   github: { token: '', owner: '', repo: '', branch: 'main', previewUrlTemplate: '' },
 
@@ -81,7 +87,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
+  'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 

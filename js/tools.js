@@ -44,6 +44,21 @@ export const TOOL_SCHEMAS = [
     input_schema: { type: 'object', properties: { id: { type: 'string' }, scale: { type: 'number' } }, required: ['id', 'scale'] },
   },
   {
+    name: 'view_page',
+    description: 'See another page of this session (1-based page number, see board_context.other_pages): returns its image plus its notes and your blocks. By default the user stays on their page; coordinates in that image are only for reading. go:true also turns the board to that page (only when the user asks to go there); then the returned image becomes the current page image for annotate / write_on_canvas.',
+    input_schema: { type: 'object', properties: { page: { type: 'integer' }, go: { type: 'boolean' } }, required: ['page'] },
+  },
+  {
+    name: 'set_page_paper',
+    description: 'Change the paper of the page the user is on: plain, dots, ruled (notebook lines) or grid (squared). For all new pages use update_settings with paper instead.',
+    input_schema: { type: 'object', properties: { style: { type: 'string', enum: ['plain', 'dots', 'ruled', 'grid'] } }, required: ['style'] },
+  },
+  {
+    name: 'export_session',
+    description: 'Export the open session when the user asks: "pdf" = the pages as written (free); "latex" = you type every page up as a LaTeX document (costs about as much as a long answer per page; the user confirms first). The user gets buttons in the panel to save the file or open the LaTeX in Overleaf.',
+    input_schema: { type: 'object', properties: { format: { type: 'string', enum: ['pdf', 'latex'] } }, required: ['format'] },
+  },
+  {
     name: 'annotate',
     description: 'Put a small margin mark on the board; the note shows when the user taps it. kind: ok | warn | error | note. x,y in pixels of the latest page image, just beside the line it refers to.',
     input_schema: {
@@ -193,11 +208,14 @@ export async function runTool(use, ctx) {
           return fail(use.id, `Nothing was written: ${bad.length} line(s) have LaTeX errors. ${bad.map((b) => `"${b.line}" → ${b.error}`).join('; ')}. Fix the LaTeX (standard MathJax commands only; math inside $...$ or a whole line in $$...$$) and call write_on_canvas again.`);
         }
         board.setLocked(true);
+        let moved = null;
         try {
-          await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
+          const blk = await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
+          moved = await board.keepOnPage(blk); // notebook: stay on the page, or continue on the next one
         } finally {
           board.setLocked(false);
         }
+        if (moved) return ok(use.id, `It did not fit on this page, so it was written at the top of page ${moved.page + 1} (now shown).`);
         if (settings.narration && settings.voiceOut && !agent.spokeThisTurn) voice.speak('Done, it is on the board.');
         const at = snap ? board.worldToImage(snap, pos.x, pos.y) : null;
         return ok(use.id, `Wrote ${lines.length} line(s) on the board${at ? ` at about (${at.x}, ${at.y}) in image pixels` : ''}.`);
@@ -206,6 +224,39 @@ export async function runTool(use, ctx) {
       case 'resize_board_block': {
         const b = await board.scaleBlock(inp.id, Number(inp.scale));
         return b ? ok(use.id, `Resized to ${Math.round((Number(inp.scale) || 1) * 100)}%.`) : fail(use.id, 'No block with that id on this page.');
+      }
+
+      case 'view_page': {
+        const i = Math.round(Number(inp.page)) - 1;
+        if (!(i >= 0 && i < board.pages.length)) return fail(use.id, `There is no page ${inp.page}; this session has ${board.pages.length} page(s).`);
+        const max = settings.imageMaxPx || 1100;
+        let shot, page;
+        if (inp.go) {
+          board.goto(i);
+          await new Promise((r) => setTimeout(r, 50));
+          ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5 }));
+          agent.lastSnap = shot; // tools now work on this page
+        } else ({ snap: shot, page } = await board.pageSnapshot(i, { maxDim: max, maxScale: 1.5 }));
+        const blank = !page.strokes.length && !page.blocks.length;
+        const info = {
+          page: i + 1,
+          name: page.name,
+          now_shown: !!inp.go || i === board.pi,
+          notes: (page.notebook || []).map((e) => ({ latex: e.latex, description: e.description })),
+          your_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => x.lines),
+        };
+        const note = inp.go ? 'The board now shows this page; x,y in this image are valid for annotate and write_on_canvas.' : 'For reading only: the user is still on their own page, so do not use x,y from this image with annotate or write_on_canvas.';
+        return ok(use.id, [...(blank ? [] : [imageBlock(shot)]), { type: 'text', text: `${blank ? 'This page is empty. ' : ''}${note}\n${JSON.stringify(info)}` }]);
+      }
+
+      case 'set_page_paper':
+        board.setPaper(inp.style);
+        return ok(use.id, `This page now uses ${inp.style} paper.`);
+
+      case 'export_session': {
+        if (!ctx.exporter) return fail(use.id, 'Export is not available.');
+        const r = inp.format === 'latex' ? await ctx.exporter.latex() : await ctx.exporter.pdf();
+        return r?.ok ? ok(use.id, `Exported ${r.pages} page(s); the user now has a button in the panel to save it.`) : fail(use.id, `Export did not finish: ${r?.error || 'unknown'}.`);
       }
 
       case 'annotate': {

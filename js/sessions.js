@@ -95,10 +95,11 @@ export class Sessions {
     return all.map((m) => (this.meta && m.id === this.meta.id ? this.meta : m));
   }
 
-  async create({ pages = [], chat = [], exchanges = [], title = 'Untitled session', titleAuto = true, subject = '', parent = null, dirty = false, notesFrom } = {}) {
+  async create({ pages = [], chat = [], exchanges = [], title = 'Untitled session', titleAuto = true, subject = '', parent = null, dirty = false, notesFrom, layout = null } = {}) {
     const id = uid();
     const now = Date.now();
-    const meta = { id, title, titleAuto, subject, pinned: false, created: now, updated: now, deletedAt: null, cost: 0, thumb: null, summary: '', recap: '', searchText: '', parent, dirty };
+    // layout: null = freeform (endless page); { size, orient, scroll, paper } = notebook. The type is fixed at creation.
+    const meta = { id, title, titleAuto, subject, pinned: false, created: now, updated: now, deletedAt: null, cost: 0, thumb: null, summary: '', recap: '', searchText: '', parent, dirty, layout };
     await idb.set('sessions', id, meta);
     await idb.set('sessionData', id, { pages, chat, exchanges, snap: notesFrom?.snap || null });
     return id;
@@ -214,6 +215,7 @@ export class Sessions {
     this.agent.stop();
     this.agent.exchanges = data.exchanges || [];
     this.agent.lastAskAt = Date.now();
+    this.board.setLayout(meta.layout || null);
     this.board.load(data.pages || []);
     this.panel.clear();
     for (const m of this.chat) this.panel.add(m.role, m.md, { noLog: true, actions: m.role === 'assistant' ? this.agent.answerActions(m.md) : undefined });
@@ -230,9 +232,25 @@ export class Sessions {
     if (!initial) this.closeDrawer();
   }
 
-  async newSession(subject = '') {
-    const id = await this.create({ subject: subject || (this.filter.startsWith('subject:') ? this.filter.slice(8) : '') });
+  async newSession(subject = '', { layout = null } = {}) {
+    const id = await this.create({ subject: subject || (this.filter.startsWith('subject:') ? this.filter.slice(8) : ''), layout });
     await this.open(id, { initial: !this.currentId });
+  }
+
+  // The "New session" button: choose freeform or notebook (and the notebook's page setup).
+  chooseNewSession() {
+    const d = $('#newSessionDlg');
+    $('#nsOptions').hidden = true;
+    d.showModal();
+  }
+
+  // Notebook page setup, changeable any time (Settings → This session); the session type itself is not.
+  async setLayout(patch) {
+    if (!this.meta?.layout) return;
+    this.meta.layout = { ...this.meta.layout, ...patch };
+    this.board.setLayout(this.meta.layout);
+    this.board.render();
+    await idb.set('sessions', this.meta.id, this.meta);
   }
 
   async branch(id) {
@@ -243,7 +261,7 @@ export class Sessions {
     const copy = structuredClone(data);
     const newId = await this.create({
       pages: copy.pages, chat: copy.chat, exchanges: copy.exchanges,
-      title: `${meta.title} (branch)`, titleAuto: false, subject: meta.subject, parent: id, notesFrom: { snap: copy.snap },
+      title: `${meta.title} (branch)`, titleAuto: false, subject: meta.subject, parent: id, notesFrom: { snap: copy.snap }, layout: meta.layout || null,
     });
     const m = await idb.get('sessions', newId);
     Object.assign(m, { summary: meta.summary, recap: meta.recap, thumb: meta.thumb, searchText: meta.searchText });
@@ -340,6 +358,11 @@ export class Sessions {
     let j;
     try { j = JSON.parse(await file.text()); } catch { return this.panel.add('error', "That file isn't a Live Board backup."); }
     if (j?.app !== 'live-board' || !Array.isArray(j.sessions)) return this.panel.add('error', "That file isn't a Live Board backup.");
+    return this.restoreData(j);
+  }
+
+  // Merges a backup (from a file or from GitHub) into what is here; newer sessions here are kept.
+  async restoreData(j) {
     await this.save();
     let added = 0, updated = 0;
     for (const { meta, data } of j.sessions) {
@@ -380,7 +403,17 @@ export class Sessions {
     $('#sessionsBtn').addEventListener('click', () => this.toggleDrawer());
     $('#sessionTitle').addEventListener('click', () => this.toggleDrawer());
     $('#drawerClose').addEventListener('click', () => this.closeDrawer());
-    $('#newSession').addEventListener('click', () => this.newSession());
+    $('#newSession').addEventListener('click', () => this.chooseNewSession());
+    $('#nsFree').addEventListener('click', () => { $('#newSessionDlg').close(); this.newSession(); });
+    $('#nsNote').addEventListener('click', () => { $('#nsOptions').hidden = false; });
+    $('#nsCancel').addEventListener('click', () => $('#newSessionDlg').close());
+    $('#nsCreate').addEventListener('click', async () => {
+      const layout = { size: $('#nsSize').value, orient: $('#nsOrient').value, paper: $('#nsPaper').value, scroll: $('#nsScroll').value };
+      $('#newSessionDlg').close();
+      await this.newSession('', { layout });
+      // the first page of a new notebook gets the notebook's paper
+      if (this.board.pages[0]) { this.board.pages[0].paper = layout.paper; this.board.render(); }
+    });
     $('#branchCurrent').addEventListener('click', () => this.branch(this.currentId));
     $('#backupBtn').addEventListener('click', () => this.backup());
     $('#restoreBtn').addEventListener('click', () => $('#restoreFile').click());

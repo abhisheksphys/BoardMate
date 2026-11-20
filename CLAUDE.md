@@ -4,20 +4,22 @@ A personal handwriting whiteboard. Claude watches the page (images), listens (sp
 
 ## Constraints
 - Static site: plain HTML, CSS, ES modules. No build step, no npm. Hosted on GitHub Pages.
-- External libraries only from cdn.jsdelivr.net or cdnjs.cloudflare.com (currently MathJax 3, marked, Pyodide, pdf.js).
+- External libraries only from cdn.jsdelivr.net or cdnjs.cloudflare.com (currently MathJax 3, marked, Pyodide, pdf.js, jsPDF).
 - Single user, online only. Data lives in the browser (localStorage for settings; IndexedDB stores `sessions`, `sessionData`, `library`, `kv`). PDFs are shared (`global`) and/or belong to sessions (`sessions: [ids]`).
 - Must work well in iPad Safari with Apple Pencil (Pointer Events, pressure; fingers pan/zoom).
 
 ## Files
 - `index.html`, `styles.css` — layout and look.
 - `js/app.js` — wiring: toolbar, mic, events, startup.
-- `js/board.js` — canvas: strokes, eraser, select/move, pan/zoom, pages, undo, AI blocks, marks, `snapshot()` for Claude.
+- `js/board.js` — canvas: strokes, eraser, select/move, pan/zoom, pages, undo, AI blocks, marks, `snapshot()` for Claude. Two session types: freeform (endless page) and notebook (`board.layout` = { size, orient, scroll, paper }: fixed-size pages shown whole, flipped with a snap, `keepOnPage()` keeps Claude's writing on the page). The type is set when a session is created (`meta.layout`) and never changes; the page setup can.
 - `js/sessions.js` — sessions: per-session pages/chat/Claude history/cost, autosave, auto titles + summaries + recaps, drawer (search, subjects, pin, branch, trash), backup/restore, session PDFs (📎).
 - `js/images.js` — paste / pick / drop images onto the page (scaled down before saving).
+- `js/export.js` — export the open session: PDF of the pages as written (jsPDF from cdnjs, A4 slices) or LaTeX typed up by Claude (save .tex / open in Overleaf).
+- `js/backup.js` — automatic incremental backup of sessions, PDFs and settings to a PRIVATE GitHub repo (`backupRepo`), and restore from it. Never writes to the app's own (public) repo; never includes the API key or token.
 - `js/inktools.js` — toolbar pen options: thickness slider/presets, colour palette, system colour picker, recent colours.
 - `js/mathrender.js` — LaTeX → image (MathJax SVG) for AI blocks.
 - `js/agent.js` — main assistant loop and system prompt; sends page image + context with every question.
-- `js/tools.js` — tool schemas and handlers Claude can call (cas, write_on_canvas, annotate, get_region, speak, notebook_update, update_settings, save_action, search_library, show_page, log_friction, propose_code_change, ship_change, roll_back).
+- `js/tools.js` — tool schemas and handlers Claude can call (cas, write_on_canvas, view_page, annotate, get_region, speak, notebook_update, update_settings, save_action, search_library, show_page, log_friction, propose_code_change, ship_change, roll_back).
 - `js/perception.js` — watcher loop (live / quiet live / on demand).
 - `js/cas.js` — SymPy via Pyodide.
 - `js/voice.js` — speech in/out, barge-in.

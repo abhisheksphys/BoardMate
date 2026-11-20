@@ -122,6 +122,12 @@ const MARK_STYLE = {
   note: { color: '#1a5fd0', sym: 'i' },
 };
 
+// Notebook sessions: fixed-size pages (world units: 96 per inch), shown whole and flipped like GoodNotes.
+export const PAGE_SIZES = { A4: [794, 1123], A5: [559, 794], Letter: [816, 1056], Square: [900, 900] };
+const PAGE_MARGIN = 16; // screen px around a page shown whole
+const PAGE_GAP = 28; // screen px between pages while flipping
+const PAGE_INSET = 24; // world px Claude's writing keeps from the page edge
+
 function drawMark(ctx, m, z) {
   const st = MARK_STYLE[m.kind] || MARK_STYLE.note;
   const r = 11 / z;
@@ -168,6 +174,8 @@ export class Board {
     this.penSeen = false;
     this.layouts = new Map(); // block id -> rendered layout
     this.noImageBlocks = false;
+    this.layout = null; // null = freeform; { size, orient, scroll, paper } = notebook
+    this.slide = 0; // notebook: screen px the pages are shifted while flipping
     this.resize();
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     this.bindInput();
@@ -176,7 +184,7 @@ export class Board {
   get page() { return this.pages[this.pi]; }
 
   newPage(name) {
-    const p = { id: uid(), name: name || `Page ${this.pages.length + 1}`, strokes: [], blocks: [], marks: [], notebook: [], view: { ox: 40, oy: 40, z: 1 } };
+    const p = { id: uid(), name: name || `Page ${this.pages.length + 1}`, paper: this.layout?.paper || settings.paper, strokes: [], blocks: [], marks: [], notebook: [], view: { ox: 40, oy: 40, z: 1 } };
     this.pages.push(p);
     return p;
   }
@@ -195,6 +203,8 @@ export class Board {
     this.redoStack = [];
     this.selection = null;
     this.activeBlock = null;
+    this.slide = 0;
+    if (this.layout) { this.fit(); this.prepareNeighbours(); }
     this.prepareBlocks();
     this.render();
     emit('page', { page: this.page, index: i, count: this.pages.length });
@@ -216,7 +226,7 @@ export class Board {
     this.o.height = this.c.height;
     this.o.style.width = r.width + 'px';
     this.o.style.height = r.height + 'px';
-    if (this.page) this.render();
+    if (this.page) { this.clampView(); this.render(); }
   }
 
   evtPos(e) {
@@ -248,7 +258,118 @@ export class Board {
     v.z = z;
     v.ox = sx - wx * z;
     v.oy = sy - wy * z;
+    this.clampView();
     this.render();
+  }
+
+  // ---------- notebook pages ----------
+  setLayout(layout) {
+    this.layout = layout ? { size: layout.size || 'A4', orient: layout.orient || 'portrait', scroll: layout.scroll || 'vertical', paper: layout.paper || 'ruled' } : null;
+    this.slide = 0;
+    if (this.page) { if (this.layout) this.fit(); this.render(); }
+  }
+
+  pageSize() {
+    const [a, b] = PAGE_SIZES[this.layout?.size] || PAGE_SIZES.A4;
+    return this.layout?.orient === 'landscape' ? { w: b, h: a } : { w: a, h: b };
+  }
+
+  pageRect() { const s = this.pageSize(); return { x: 0, y: 0, w: s.w, h: s.h }; }
+
+  fitZoom() {
+    const s = this.pageSize();
+    return Math.max(0.05, Math.min((this.w - 2 * PAGE_MARGIN) / s.w, (this.h - 2 * PAGE_MARGIN) / s.h));
+  }
+
+  // the whole page, centred
+  fit() {
+    if (!this.layout || !this.page) return;
+    const v = this.page.view, s = this.pageSize(), z = this.fitZoom();
+    v.z = z;
+    v.ox = (this.w - s.w * z) / 2;
+    v.oy = (this.h - s.h * z) / 2;
+  }
+
+  atFit() { return !!this.layout && this.page.view.z <= this.fitZoom() * 1.02; }
+
+  // Notebook: never smaller than the whole page; zoomed in, the page always covers the screen.
+  clampView() {
+    if (!this.layout || !this.page) return;
+    const v = this.page.view, s = this.pageSize();
+    if (v.z <= this.fitZoom() * 1.02) return this.fit();
+    const axis = (size, screen, o) => (size * v.z <= screen - 2 * PAGE_MARGIN ? (screen - size * v.z) / 2 : clamp(o, screen - PAGE_MARGIN - size * v.z, PAGE_MARGIN));
+    v.ox = axis(s.w, this.w, v.ox);
+    v.oy = axis(s.h, this.h, v.oy);
+  }
+
+  vertical() { return this.layout?.scroll !== 'horizontal'; }
+
+  // screen distance from one page to the next while flipping
+  pageStep() { const s = this.pageSize(); return (this.vertical() ? s.h : s.w) * this.page.view.z + PAGE_GAP; }
+
+  prepareNeighbours() {
+    for (const k of [-1, 1]) {
+      const p = this.pages[this.pi + k];
+      if (p) for (const b of p.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
+    }
+  }
+
+  // Slide to the next (+1) or previous (-1) page, or back (0), and settle there: a page is never left half in view.
+  flipTo(dir) {
+    const target = dir === 0 || !this.pages[this.pi + dir] ? 0 : -dir * this.pageStep();
+    const from = this.slide, t0 = performance.now(), ms = 220;
+    cancelAnimationFrame(this.flipRaf);
+    const stepFn = (t) => {
+      const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+      this.slide = from + (target - from) * e;
+      this.render();
+      if (k < 1) { this.flipRaf = requestAnimationFrame(stepFn); return; }
+      this.flipRaf = null;
+      if (target !== 0) { this.slide = 0; this.goto(this.pi + dir); this.saveSoon(); }
+      else { this.slide = 0; this.render(); }
+    };
+    this.flipRaf = requestAnimationFrame(stepFn);
+  }
+
+  // An image of another page (for Claude), without showing it: its blocks are laid out first.
+  async pageSnapshot(i, opts = {}) {
+    const keep = this.pi;
+    this.pi = i;
+    try {
+      await Promise.all(this.page.blocks.map((b) => (this.layouts.has(b.id) ? null : this.layoutBlock(b))));
+      return { snap: this.snapshot(opts), page: this.page };
+    } finally {
+      this.pi = keep;
+    }
+  }
+
+  // Keeps something Claude wrote (or a picture) on the page; writing that no longer fits continues on the next page.
+  async keepOnPage(b) {
+    if (!this.layout || !b) return null;
+    const s = this.pageSize(), m = PAGE_INSET;
+    if ((b.w || 0) > s.w - 2 * m) await this.scaleBlock(b.id, (s.w - 2 * m) / b.w);
+    b.x = clamp(b.x, m, Math.max(m, s.w - m - (b.w || 0)));
+    b.y = Math.max(m, b.y);
+    if (b.y + (b.h || 0) <= s.h - m || b.kind === 'image' || (b.h || 0) > s.h - 2 * m) {
+      b.y = Math.min(b.y, Math.max(m, s.h - m - (b.h || 0)));
+      this.render();
+      this.saveSoon();
+      return null;
+    }
+    const from = this.pi;
+    this.page.blocks.splice(this.page.blocks.indexOf(b), 1);
+    this.render();
+    if (from + 1 >= this.pages.length) this.newPage();
+    const next = this.pages[from + 1];
+    let bottom = m;
+    for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + 20); }
+    for (const x of next.blocks) bottom = Math.max(bottom, x.y + (x.h || 0) + 20);
+    b.y = bottom;
+    next.blocks.push(b);
+    this.goto(from + 1);
+    this.markDirty({ x: b.x, y: b.y, w: b.w || 0, h: b.h || 0 });
+    this.saveSoon();
+    return { page: from + 1 };
   }
 
   ensureVisible(rect) {
@@ -258,6 +379,7 @@ export class Board {
     const v = this.page.view;
     v.ox = this.w * 0.15 - rect.x * v.z;
     v.oy = this.h * 0.2 - rect.y * v.z;
+    this.clampView();
     this.render();
   }
 
@@ -279,7 +401,13 @@ export class Board {
       e.preventDefault();
       const { sx, sy } = this.evtPos(e);
       if (e.ctrlKey || e.metaKey) this.zoomAt(sx, sy, Math.exp(-e.deltaY * 0.01));
-      else { this.page.view.ox -= e.deltaX; this.page.view.oy -= e.deltaY; this.render(); }
+      else if (this.atFit()) {
+        // notebook, whole page in view: a scroll flips to the next or previous page
+        this.wheelAcc = (this.wheelAcc || 0) + (this.vertical() ? e.deltaY : e.deltaX || e.deltaY);
+        clearTimeout(this.wheelTimer);
+        this.wheelTimer = setTimeout(() => { this.wheelAcc = 0; }, 250);
+        if (Math.abs(this.wheelAcc) > 90 && !this.flipRaf) { const d = Math.sign(this.wheelAcc); this.wheelAcc = 0; this.flipTo(d); }
+      } else { this.page.view.ox -= e.deltaX; this.page.view.oy -= e.deltaY; this.clampView(); this.render(); }
       this.saveSoon();
     }, { passive: false });
   }
@@ -414,10 +542,19 @@ export class Board {
 
   onUp(e, cancelled) {
     if (this.touches.has(e.pointerId)) {
+      const g = this.gesture;
       this.touches.delete(e.pointerId);
       this.gesture = null;
-      if (this.touches.size) this.startGesture();
-      else this.saveSoon();
+      if (this.touches.size) { if (g?.paging) this.slide = 0; this.startGesture(); }
+      else {
+        if (g?.paging) {
+          // flip if dragged far enough (or flicked), otherwise settle back on this page
+          const fast = Math.abs(this.slide) > 40 && performance.now() - g.t0 < 300;
+          const far = Math.abs(this.slide) > this.pageStep() * 0.18;
+          this.flipTo(far || fast ? -Math.sign(this.slide) : 0);
+        }
+        this.saveSoon();
+      }
       return;
     }
     const d = this.drawing;
@@ -491,7 +628,7 @@ export class Board {
   startGesture() {
     const pts = [...this.touches.values()];
     const v = this.page.view;
-    if (pts.length === 1) this.gesture = { kind: 'pan', p0: pts[0], o0: { x: v.ox, y: v.oy } };
+    if (pts.length === 1) this.gesture = { kind: 'pan', p0: pts[0], o0: { x: v.ox, y: v.oy }, paging: this.atFit(), t0: performance.now() };
     else if (pts.length >= 2) {
       const [a, b] = pts;
       this.gesture = { kind: 'pinch', d0: Math.max(1, dist(a, b)), m0: mid(a, b), z0: v.z, o0: { x: v.ox, y: v.oy } };
@@ -503,9 +640,15 @@ export class Board {
     if (!g) return;
     const pts = [...this.touches.values()];
     const v = this.page.view;
-    if (g.kind === 'pan' && pts.length === 1) {
+    if (g.kind === 'pan' && pts.length === 1 && g.paging) {
+      // notebook, whole page in view: drag along the scroll direction to flip (with resistance at the ends)
+      let d = this.vertical() ? pts[0].sy - g.p0.sy : pts[0].sx - g.p0.sx;
+      if ((d > 0 && this.pi === 0) || (d < 0 && this.pi === this.pages.length - 1)) d *= 0.3;
+      this.slide = d;
+    } else if (g.kind === 'pan' && pts.length === 1) {
       v.ox = g.o0.x + pts[0].sx - g.p0.sx;
       v.oy = g.o0.y + pts[0].sy - g.p0.sy;
+      this.clampView();
     } else if (g.kind === 'pan' && pts.length >= 2) {
       this.startGesture();
     } else if (g.kind === 'pinch' && pts.length >= 2) {
@@ -516,6 +659,7 @@ export class Board {
       v.z = z;
       v.ox = m.sx - wx * z;
       v.oy = m.sy - wy * z;
+      this.clampView();
     }
     this.render();
   }
@@ -790,10 +934,18 @@ export class Board {
     return b;
   }
 
-  pinImage(src, w, h) {
-    const scale = Math.min(1, 520 / w);
+  async pinImage(src, w, h) {
     const cb = this.contentBounds();
     const vis = this.visibleWorld();
+    if (this.layout) {
+      // notebook: below what is on the page, as wide as fits
+      const s = this.pageSize();
+      const scale = Math.min(1, 520 / w, (s.w - 2 * PAGE_INSET) / w);
+      const b = await this.addBlock({ kind: 'image', src, x: PAGE_INSET, y: cb ? cb.y + cb.h + 30 : PAGE_INSET, w: w * scale, h: h * scale });
+      await this.keepOnPage(b);
+      return b;
+    }
+    const scale = Math.min(1, 520 / w);
     const x = cb ? cb.x + cb.w + 60 : vis.x + 40;
     const y = cb ? cb.y : vis.y + 40;
     return this.addBlock({ kind: 'image', src, x, y, w: w * scale, h: h * scale });
@@ -808,6 +960,7 @@ export class Board {
     const x = at ? at.x - W / 2 : vis.x + (vis.w - W) / 2;
     const y = at ? at.y - H / 2 : vis.y + (vis.h - H) / 2;
     const b = await this.addBlock({ kind: 'image', src, x, y, w: W, h: H }, { author: 'user' });
+    await this.keepOnPage(b);
     this.activeBlock = b;
     this.markDirty({ x, y, w: W, h: H });
     this.render();
@@ -841,7 +994,13 @@ export class Board {
   // Renders (part of) the page to a JPEG for Claude. Returns mapping info so image pixels can be
   // converted back to board coordinates.
   snapshot({ region = null, maxDim = 1400, maxScale = 2, pad = 30 } = {}) {
-    let bb = region || this.contentBounds() || this.visibleWorld();
+    let bb = region || this.contentBounds() || (this.layout ? this.pageRect() : this.visibleWorld());
+    if (this.layout && !region) {
+      // what is on the page (writing off the page's edge is not part of it)
+      const pr = this.pageRect();
+      const x0 = Math.max(bb.x, 0), y0 = Math.max(bb.y, 0), x1 = Math.min(bb.x + bb.w, pr.w), y1 = Math.min(bb.y + bb.h, pr.h);
+      bb = x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : pr;
+    }
     bb = { x: bb.x - pad, y: bb.y - pad, w: bb.w + 2 * pad, h: bb.h + 2 * pad };
     let scale = Math.min(maxScale, maxDim / Math.max(bb.w, bb.h));
     if (!region && scale < 0.5) {
@@ -903,7 +1062,9 @@ export class Board {
       this.raf = null;
       if (!this.page) return;
       const v = this.page.view;
-      if (this.needFull) {
+      if (this.layout && (this.needFull || this.slide)) {
+        this.drawNotebook();
+      } else if (this.needFull) {
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.fillStyle = '#ffffff';
         this.ctx.fillRect(0, 0, this.c.width, this.c.height);
@@ -911,8 +1072,11 @@ export class Board {
       } else {
         if (this.pendingRegion) this.redrawRegion(this.pendingRegion);
         if (this.pendingStrokes.length) {
+          this.ctx.save();
           this.ctx.setTransform(this.dpr * v.z, 0, 0, this.dpr * v.z, this.dpr * v.ox, this.dpr * v.oy);
+          if (this.layout) { const pr = this.pageRect(); this.ctx.beginPath(); this.ctx.rect(pr.x, pr.y, pr.w, pr.h); this.ctx.clip(); }
           for (const s of this.pendingStrokes) drawStroke(this.ctx, s);
+          this.ctx.restore();
         }
       }
       this.needFull = false;
@@ -925,7 +1089,14 @@ export class Board {
   redrawRegion(r) {
     const v = this.page.view, ctx = this.ctx;
     const pad = 4 / v.z;
-    const rr = { x: r.x - pad, y: r.y - pad, w: r.w + 2 * pad, h: r.h + 2 * pad };
+    let rr = { x: r.x - pad, y: r.y - pad, w: r.w + 2 * pad, h: r.h + 2 * pad };
+    if (this.layout) {
+      // only the part on the page (the grey around it never changes)
+      const pr = this.pageRect();
+      const x0 = Math.max(rr.x, pr.x), y0 = Math.max(rr.y, pr.y), x1 = Math.min(rr.x + rr.w, pr.w), y1 = Math.min(rr.y + rr.h, pr.h);
+      if (x1 <= x0 || y1 <= y0) return;
+      rr = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
     ctx.save();
     ctx.setTransform(this.dpr * v.z, 0, 0, this.dpr * v.z, this.dpr * v.ox, this.dpr * v.oy);
     ctx.beginPath();
@@ -945,6 +1116,40 @@ export class Board {
     if (grid) this.drawGrid(ctx, view, vis);
     for (const b of this.page.blocks) if (meets({ x: b.x - 12, y: b.y, w: (b.w || 200) + 12, h: b.h || 40 })) this.drawBlock(ctx, b);
     for (const s of this.page.strokes) if (meets(strokeBBox(s))) drawStroke(ctx, s);
+  }
+
+  // Notebook: grey desk, the current page (and, while flipping, its neighbours) as sheets of paper.
+  drawNotebook() {
+    const ctx = this.ctx, v = this.page.view, s = this.pageSize(), step = this.pageStep();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#e6e8ec';
+    ctx.fillRect(0, 0, this.c.width, this.c.height);
+    const keep = this.pi;
+    for (const k of [-1, 0, 1]) {
+      const i = keep + k;
+      if (!this.pages[i]) continue;
+      const off = this.slide + k * step;
+      if (Math.abs(off) >= (this.vertical() ? this.h : this.w) + step) continue;
+      const view = { z: v.z, ox: v.ox + (this.vertical() ? 0 : off), oy: v.oy + (this.vertical() ? off : 0) };
+      this.pi = i;
+      try {
+        ctx.save();
+        ctx.setTransform(this.dpr * view.z, 0, 0, this.dpr * view.z, this.dpr * view.ox, this.dpr * view.oy);
+        ctx.shadowColor = 'rgba(0,0,0,0.16)';
+        ctx.shadowBlur = 10 * this.dpr;
+        ctx.shadowOffsetY = 2 * this.dpr;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, s.w, s.h);
+        ctx.shadowColor = 'transparent';
+        ctx.beginPath();
+        ctx.rect(0, 0, s.w, s.h);
+        ctx.clip();
+        this.drawContent(ctx, view, this.dpr, null, true);
+        ctx.restore();
+      } finally {
+        this.pi = keep;
+      }
+    }
   }
 
   // Snapshot for Claude (no grid, no marks).
@@ -1013,13 +1218,42 @@ export class Board {
     }
   }
 
+  // Paper: this page's own choice, else the default for new pages. Never part of what Claude sees.
+  paperOf(page = this.page) { return page?.paper || settings.paper || 'dots'; }
+
+  setPaper(style) {
+    this.page.paper = style;
+    this.render();
+    this.saveSoon();
+  }
+
   drawGrid(ctx, view, vis) {
-    if (view.z < 0.45) return;
-    const step = 40;
-    ctx.fillStyle = '#d9dce1';
-    const r = 1.1 / view.z;
-    for (let x = Math.floor(vis.x / step) * step; x < vis.x + vis.w; x += step)
-      for (let y = Math.floor(vis.y / step) * step; y < vis.y + vis.h; y += step) ctx.fillRect(x - r / 2, y - r / 2, r, r);
+    const style = this.paperOf();
+    if (style === 'plain') return;
+    const step = Math.max(16, Number(settings.paperSpacing) || 40);
+    const x0 = Math.floor(vis.x / step) * step, y0 = Math.floor(vis.y / step) * step;
+    if (style === 'dots') {
+      if (view.z < 0.45) return;
+      ctx.fillStyle = '#d9dce1';
+      const r = 1.1 / view.z;
+      for (let x = x0; x < vis.x + vis.w; x += step)
+        for (let y = y0; y < vis.y + vis.h; y += step) ctx.fillRect(x - r / 2, y - r / 2, r, r);
+      return;
+    }
+    if (view.z < 0.3) return;
+    ctx.save();
+    ctx.lineWidth = 1 / view.z;
+    ctx.strokeStyle = style === 'grid' ? '#e2e6ec' : '#d6dde8';
+    ctx.beginPath();
+    for (let y = y0; y < vis.y + vis.h; y += step) { ctx.moveTo(vis.x, y); ctx.lineTo(vis.x + vis.w, y); }
+    if (style === 'grid') for (let x = x0; x < vis.x + vis.w; x += step) { ctx.moveTo(x, vis.y); ctx.lineTo(x, vis.y + vis.h); }
+    ctx.stroke();
+    if (style === 'ruled' && vis.x < 0 && vis.x + vis.w > 0) {
+      // a notebook's margin line
+      ctx.strokeStyle = '#f0c4c4';
+      ctx.beginPath(); ctx.moveTo(0, vis.y); ctx.lineTo(0, vis.y + vis.h); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawBlock(ctx, b) {

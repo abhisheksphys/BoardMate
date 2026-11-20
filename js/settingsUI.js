@@ -47,6 +47,8 @@ const SECTIONS = [
     { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
     { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
     { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },
+    { k: 'paper', label: 'Paper for new pages (and pages that haven\'t picked their own)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
+    { k: 'paperSpacing', label: 'Line / dot spacing on the paper', type: 'number', step: 2 },
     { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
     { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
   ]],
@@ -68,6 +70,10 @@ const SECTIONS = [
     { k: 'github.repo', label: 'Repo name' },
     { k: 'github.branch', label: 'Live branch' },
     { k: 'github.previewUrlTemplate', label: 'Preview URL template (optional, e.g. https://deploy-preview-{pr}--yoursite.netlify.app)' },
+  ]],
+  ['Backup to GitHub', [
+    { k: 'backupRepo', label: 'Private repository for backups (name, or owner/name). Make a new PRIVATE repo on GitHub, e.g. live-board-backups, and give the token below "Contents: read and write" on it', },
+    { k: 'backupAuto', label: 'Back up automatically when something changes (at most every 10 minutes)', type: 'checkbox' },
   ]],
   ['Advanced', [
     { k: 'pyodideUrl', label: 'Pyodide URL (SymPy runtime)' },
@@ -130,6 +136,21 @@ export class SettingsUI {
             <div class="buttons"><button type="button" id="testVoice">Test voice</button><button type="button" id="copyVoiceLog">Copy voice log</button><button type="button" id="clearVoiceLog" class="ghost">Clear log</button></div>
             <div id="voiceLogMsg" class="muted small"></div>
           </fieldset>
+          <fieldset><legend>GitHub backup</legend>
+            <div id="backupStatus" class="muted small"></div>
+            <div class="buttons"><button type="button" id="backupNow">Back up now</button><button type="button" id="backupRestore" class="ghost">Restore from GitHub</button></div>
+          </fieldset>
+          <fieldset id="sessionLayoutBox" hidden><legend>This session (notebook)</legend>
+            <label class="row"><span>Page size</span><select id="slSize"><option value="A4">A4</option><option value="A5">A5</option><option value="Letter">US Letter</option><option value="Square">Square</option></select></label>
+            <label class="row"><span>Orientation</span><select id="slOrient"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
+            <label class="row"><span>Pages scroll</span><select id="slScroll"><option value="vertical">Vertically (up / down)</option><option value="horizontal">Horizontally (left / right)</option></select></label>
+            <label class="row"><span>Paper for new pages</span><select id="slPaper"><option value="ruled">Ruled</option><option value="grid">Grid (squared)</option><option value="dots">Dots</option><option value="plain">Plain</option></select></label>
+            <div class="muted small">Changes apply right away. A smaller page can hide writing near the edges (it is kept, just outside the page).</div>
+          </fieldset>
+          <fieldset><legend>This page</legend>
+            <label class="row"><span>Paper for the page you are on</span><select id="pagePaper"><option value="plain">Plain</option><option value="dots">Dots</option><option value="ruled">Ruled (notebook)</option><option value="grid">Grid (squared)</option></select></label>
+            <div class="muted small">Changes this page right away. New pages use the "Paper for new pages" setting under Board.</div>
+          </fieldset>
           <fieldset><legend>Where the money goes</legend>
             <div id="costBreakdown" class="small"></div>
             <div class="muted small">Estimated from token counts at list prices; the Claude Console usage page is the exact record. "This month" by purpose counts from this update on.</div>
@@ -156,6 +177,15 @@ export class SettingsUI {
     this.fillVoices();
     this.fillModels();
     this.renderCosts();
+    window.liveBackup?.status().then((t) => { const el = document.getElementById('backupStatus'); if (el) el.textContent = t; });
+    const lay = window.liveSessions?.meta?.layout;
+    const box = document.getElementById('sessionLayoutBox');
+    if (box) {
+      box.hidden = !lay;
+      if (lay) { document.getElementById('slSize').value = lay.size; document.getElementById('slOrient').value = lay.orient; document.getElementById('slScroll').value = lay.scroll; document.getElementById('slPaper').value = lay.paper || 'ruled'; }
+    }
+    const pp = document.getElementById('pagePaper');
+    if (pp && window.liveBoard) pp.value = window.liveBoard.paperOf();
     document.getElementById('set-apiKey')?.addEventListener('change', () => this.fillModels());
     this.renderSaved();
     this.renderBooks();
@@ -250,6 +280,22 @@ export class SettingsUI {
         ta.focus(); ta.select();
       }
     });
+    d.querySelector('#backupNow').addEventListener('click', async () => {
+      const bk = window.liveBackup;
+      const st = d.querySelector('#backupStatus');
+      st.textContent = 'Backing up…';
+      const r = await bk.run();
+      st.textContent = r.ok ? await bk.status() : 'Failed: ' + r.error;
+    });
+    d.querySelector('#backupRestore').addEventListener('click', async () => {
+      if (!confirm('Download your GitHub backup and merge it in? Sessions that are newer on this iPad are kept.')) return;
+      this.close?.();
+      await window.liveBackup.restore();
+    });
+    for (const [id, key] of [['#slSize', 'size'], ['#slOrient', 'orient'], ['#slScroll', 'scroll'], ['#slPaper', 'paper']]) {
+      d.querySelector(id).addEventListener('change', (e) => window.liveSessions?.setLayout({ [key]: e.target.value }));
+    }
+    d.querySelector('#pagePaper').addEventListener('change', (e) => window.liveBoard?.setPaper(e.target.value));
     d.querySelector('#copyWatchLog').addEventListener('click', async () => {
       const w = window.liveWatcher;
       const text = w ? w.report() : 'Watching has not started.';

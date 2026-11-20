@@ -14,6 +14,8 @@ import { meter, fmt, overBudget } from './costs.js';
 import { initInkTools } from './inktools.js';
 import { initImages } from './images.js';
 import { Sessions } from './sessions.js';
+import { Exporter } from './export.js';
+import { Backup } from './backup.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -42,6 +44,17 @@ function askFrom(text, origin, label) {
 const sessions = new Sessions({ board, panel, agent });
 agent.sessions = sessions;
 window.liveSessions = sessions;
+const exporter = new Exporter({ board, panel, sessions });
+agent.exporter = exporter;
+window.liveExporter = exporter;
+window.liveBackup = new Backup({ panel, sessions });
+$('#exportBtn')?.addEventListener('click', () => {
+  sessions.closeDrawer?.();
+  $('#exportDlg').showModal();
+});
+$('#exportPdf')?.addEventListener('click', () => { $('#exportDlg').close(); exporter.pdf(); });
+$('#exportTex')?.addEventListener('click', () => { $('#exportDlg').close(); exporter.latex(); });
+$('#exportCancel')?.addEventListener('click', () => $('#exportDlg').close());
 
 // ---------- toolbar ----------
 function selectTool(name) {

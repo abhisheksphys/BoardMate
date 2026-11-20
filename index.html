@@ -48,34 +48,56 @@
     }, 9000);
   </script>
   <!-- Cache busting: every module is fetched with this update's version, so new files never mix with cached old ones. -->
+  <dialog id="newSessionDlg" class="export-dlg">
+    <h3>New session</h3>
+    <button type="button" id="nsFree"><b>Freeform</b><span>One endless page: zoom out, move anywhere, write anywhere.</span></button>
+    <button type="button" id="nsNote"><b>Notebook</b><span>Fixed-size pages you flip through, like GoodNotes: page 1, page 2…</span></button>
+    <div id="nsOptions" class="ns-options" hidden>
+      <label>Page size <select id="nsSize"><option value="A4">A4</option><option value="A5">A5</option><option value="Letter">US Letter</option><option value="Square">Square</option></select></label>
+      <label>Orientation <select id="nsOrient"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
+      <label>Paper <select id="nsPaper"><option value="ruled">Ruled</option><option value="grid">Grid (squared)</option><option value="dots">Dots</option><option value="plain">Plain</option></select></label>
+      <label>Pages scroll <select id="nsScroll"><option value="vertical">Vertically (up / down)</option><option value="horizontal">Horizontally (left / right)</option></select></label>
+      <div class="muted small">All of this can be changed later in Settings → This session.</div>
+      <div class="buttons"><button type="button" id="nsCreate">Create notebook</button></div>
+    </div>
+    <div class="buttons"><button type="button" id="nsCancel" class="ghost">Cancel</button></div>
+  </dialog>
+  <dialog id="exportDlg" class="export-dlg">
+    <h3>Export this session</h3>
+    <button type="button" id="exportPdf"><b>PDF, as written</b><span>Your pages as they look: handwriting, Claude's blocks, pictures and paper. Free.</span></button>
+    <button type="button" id="exportTex"><b>LaTeX, typed up by Claude</b><span>Claude transcribes every page into a .tex document; save it or open it in Overleaf to get a typeset PDF. Uses the strong model (you'll see the cost first).</span></button>
+    <div class="buttons"><button type="button" id="exportCancel" class="ghost">Cancel</button></div>
+  </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.20-2049",
-  "./js/app.js": "./js/app.js?v=2026.11.20-2049",
-  "./js/board.js": "./js/board.js?v=2026.11.20-2049",
-  "./js/bus.js": "./js/bus.js?v=2026.11.20-2049",
-  "./js/cas.js": "./js/cas.js?v=2026.11.20-2049",
-  "./js/changes.js": "./js/changes.js?v=2026.11.20-2049",
-  "./js/claude.js": "./js/claude.js?v=2026.11.20-2049",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.20-2049",
-  "./js/costs.js": "./js/costs.js?v=2026.11.20-2049",
-  "./js/github.js": "./js/github.js?v=2026.11.20-2049",
-  "./js/images.js": "./js/images.js?v=2026.11.20-2049",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.20-2049",
-  "./js/library.js": "./js/library.js?v=2026.11.20-2049",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.20-2049",
-  "./js/panel.js": "./js/panel.js?v=2026.11.20-2049",
-  "./js/perception.js": "./js/perception.js?v=2026.11.20-2049",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.20-2049",
-  "./js/settings.js": "./js/settings.js?v=2026.11.20-2049",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.20-2049",
-  "./js/storage.js": "./js/storage.js?v=2026.11.20-2049",
-  "./js/tools.js": "./js/tools.js?v=2026.11.20-2049",
-  "./js/version.js": "./js/version.js?v=2026.11.20-2049",
-  "./js/voice.js": "./js/voice.js?v=2026.11.20-2049"
+  "./js/agent.js": "./js/agent.js?v=2026.11.20-2300",
+  "./js/app.js": "./js/app.js?v=2026.11.20-2300",
+  "./js/backup.js": "./js/backup.js?v=2026.11.20-2300",
+  "./js/board.js": "./js/board.js?v=2026.11.20-2300",
+  "./js/bus.js": "./js/bus.js?v=2026.11.20-2300",
+  "./js/cas.js": "./js/cas.js?v=2026.11.20-2300",
+  "./js/changes.js": "./js/changes.js?v=2026.11.20-2300",
+  "./js/claude.js": "./js/claude.js?v=2026.11.20-2300",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.20-2300",
+  "./js/costs.js": "./js/costs.js?v=2026.11.20-2300",
+  "./js/export.js": "./js/export.js?v=2026.11.20-2300",
+  "./js/github.js": "./js/github.js?v=2026.11.20-2300",
+  "./js/images.js": "./js/images.js?v=2026.11.20-2300",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.20-2300",
+  "./js/library.js": "./js/library.js?v=2026.11.20-2300",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.20-2300",
+  "./js/panel.js": "./js/panel.js?v=2026.11.20-2300",
+  "./js/perception.js": "./js/perception.js?v=2026.11.20-2300",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.20-2300",
+  "./js/settings.js": "./js/settings.js?v=2026.11.20-2300",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.20-2300",
+  "./js/storage.js": "./js/storage.js?v=2026.11.20-2300",
+  "./js/tools.js": "./js/tools.js?v=2026.11.20-2300",
+  "./js/version.js": "./js/version.js?v=2026.11.20-2300",
+  "./js/voice.js": "./js/voice.js?v=2026.11.20-2300"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.20-2049"></script>
+  <script type="module" src="js/app.js?v=2026.11.20-2300"></script>
 </head>
 <body class="panel-right">
   <div id="errBar" role="alert" hidden><span></span><button type="button" onclick="location.reload()">Reload</button><button type="button" aria-label="Dismiss" onclick="this.parentNode.hidden=true">✕</button></div>
@@ -158,6 +180,7 @@
       <div id="sessionList"></div>
       <div class="drawer-foot">
         <button id="branchCurrent" type="button" title="Copy this session to try a different approach">Branch this session</button>
+        <button id="exportBtn" type="button" title="Save this session as a PDF or as LaTeX">Export…</button>
         <button id="backupBtn" type="button">Back up</button>
         <button id="restoreBtn" type="button">Restore…</button>
         <input type="file" id="restoreFile" accept=".json,application/json" hidden>

@@ -57,6 +57,7 @@ Answering
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
 - Use search_library and show_page for the user's PDFs (the shared library plus this session's own materials).
 - ${s.webSearch ? 'web_search: when the user asks you to look something up (a paper, an arXiv preprint, a reference, a current value), search as much as it takes to find it. Without being asked, search only when the question needs current or outside facts (a recent measurement, a specific paper\'s result, a convention in a named source); never for textbook physics or derivations. Your citations are listed as sources under the answer automatically.' : 'Web search is turned off in settings: if a question needs it, say so.'}
+- The session may have several pages; you see only the current one. board_context.other_pages lists the others (their notes and your blocks, as text). When a question needs another page ("look at page 3", "use the result from earlier", "compare with page 2"), call view_page for it. Use go:true only when the user asks to go to / open / show that page.
 - Work is organised in sessions. To bring something from another session ("the boundary conditions from yesterday"), call list_sessions, then read_session, then write it here.
 - Keep your notebook (notebook_update) current with the equations you read: LaTeX, short description, position. It is your memory of the page.
 - Be concise and precise. The user is an expert; skip basics and preamble. Shorter answers also cost less.
@@ -156,11 +157,20 @@ export class Agent {
     const page = b.page;
     const ctx = {
       page: page.name,
+      session_type: b.layout ? `notebook: page ${b.pi + 1} of ${b.pages.length}, ${b.layout.size} ${b.layout.orient}; the image shows the page. Board writing stays on the page; what doesn't fit continues on the next page.` : 'freeform (an endless page)',
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
       selection: selection ? b.rectToImage(snap, selection) : null,
       your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ id: x.id, at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
       notebook: page.notebook.slice(-40).map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
+      // the session's other pages, as text only (cheap); view_page fetches one when it is needed
+      other_pages: b.pages.length > 1 ? b.pages.map((p, i) => ({ p, i })).filter(({ i }) => i !== b.pi).map(({ p, i }) => ({
+        page: i + 1,
+        name: p.name,
+        empty: !p.strokes.length && !p.blocks.length,
+        notes: (p.notebook || []).slice(0, 8).map((e) => String(e.description || e.latex).slice(0, 80)),
+        your_blocks: p.blocks.filter((x) => x.kind !== 'image' && x.lines?.length).slice(0, 4).map((x) => x.lines.join(' ').slice(0, 80)),
+      })) : undefined,
       input: origin,
     };
     content.push({ type: 'text', text: `<board_context>${JSON.stringify(ctx)}</board_context>\n\n${text}` });
@@ -199,7 +209,7 @@ export class Agent {
     try {
       ex.push({ role: 'user', content: this.buildTurn(text, opts) });
       this.exchanges.push(ex);
-      const ctx = { board: this.board, panel: this.panel, voice: this.voice, agent: this, changes: this.changes, sessions: this.sessions };
+      const ctx = { board: this.board, panel: this.panel, voice: this.voice, agent: this, changes: this.changes, sessions: this.sessions, exporter: this.exporter };
       for (let step = 0; step < MAX_STEPS; step++) {
         tiersUsed.add(this.tier);
         this.panel.status(`Thinking (${TIER_NAMES[this.tier]})…`);
