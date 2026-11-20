@@ -27,7 +27,7 @@ const SECTIONS = [
     { k: 'voiceSend', label: 'Sending what you say', type: 'select', options: [['auto', 'Automatically, after I stop speaking'], ['manual', 'When I tap ↑ in the speech bar']] },
     { k: 'voiceSendDelaySec', label: 'Automatic sending: seconds of silence before it sends (e.g. 1.5; longer gives you time to think)', type: 'number', step: 0.5 },
     { k: 'wakeWord', label: 'Wake word (empty = everything you say is sent)' },
-    { k: 'headphones', label: 'Using headphones (keep listening while Claude talks; lets you interrupt)', type: 'checkbox' },
+    { k: 'headphones', label: 'Wearing headphones: talking while Claude speaks interrupts it (leave off when using the iPad speaker, or the mic hears Claude and cuts it off)', type: 'checkbox' },
     { k: 'voiceOut', label: 'Spoken replies', type: 'checkbox' },
     { k: 'narration', label: 'Narrate actions ("done, it is on the board")', type: 'checkbox' },
     { k: 'voiceName', label: 'Voice', type: 'voice' },

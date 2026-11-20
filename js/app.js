@@ -86,6 +86,7 @@ $('#attention').addEventListener('change', (e) => setSettings({ attention: e.tar
 $('#voiceOutBtn').addEventListener('click', () => {
   setSettings({ voiceOut: !settings.voiceOut });
   if (!settings.voiceOut) voice.cancelSpeech();
+  else voice.unlock(); // this tap can unlock speech output (only if the mic is off)
 });
 $('#panelBtn').addEventListener('click', () => {
   const order = ['right', 'bottom', 'left', 'float', 'hidden'];
@@ -150,11 +151,11 @@ on('mic', (st) => {
 });
 on('voice-debug', (m) => panel.add('info', `🎙 ${m}`, { noLog: true }));
 on('speaking', (v) => $('#voiceOutBtn').classList.toggle('speaking', v));
-// Unlock speech output (iOS needs a tap for that) on the first tap that isn't the mic.
+// Unlock speech output (iOS needs a tap for that) on a tap that isn't the mic, once replies are on
+// and the mic is off (see voice.unlock).
 const unlockOnTap = (e) => {
   if (e.target.closest?.('#micBtn')) return;
-  voice.unlock();
-  document.removeEventListener('pointerdown', unlockOnTap, true);
+  if (voice.unlock()) document.removeEventListener('pointerdown', unlockOnTap, true);
 };
 document.addEventListener('pointerdown', unlockOnTap, true);
 

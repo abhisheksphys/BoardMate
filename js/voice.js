@@ -136,7 +136,7 @@ class Voice {
     });
     // "ready" = Safari is actually hearing audio (not just asked to start). Some iPads only signal it
     // through the first result, so that counts too.
-    const ready = (why) => { if (!this.ready) { this.ready = true; this.debug(why); emit('mic', this.state()); this.unlockSoon(); } };
+    const ready = (why) => { if (!this.ready) { this.ready = true; this.debug(why); emit('mic', this.state()); } };
     r.onstart = () => { if (mine()) { this.lastActivity = Date.now(); ready('listening started'); } };
     r.onaudiostart = () => { if (mine()) { this.lastActivity = Date.now(); ready('microphone is on'); } };
     r.onresult = (e) => {
@@ -212,6 +212,10 @@ class Voice {
         this.listening = false; this.ready = false; this.rec = null; emit('mic', this.state());
         if (document.visibilityState !== 'visible') return; // the app was in the background: not a permission problem
         emit('voice-error', 'Safari is not allowing speech recognition. Allow the microphone (aA button in the address bar → Website Settings), and make sure Dictation is on (iPad Settings → General → Keyboard).');
+      } else if (e.error === 'audio-capture') {
+        // iOS took the microphone away (Control Center, a notification, Siri, another app...): the run ends next
+        this.stopNoticeShown = true;
+        emit('voice-notice', 'iOS muted the microphone (something else used the audio for a moment). Tap the mic to listen again.');
       } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
         emit('voice-error', 'Speech recognition: ' + e.error);
       }
@@ -354,24 +358,28 @@ class Voice {
   }
 
   // ---- speech out ----
+  // iOS only lets a page speak later if it has spoken once from a tap. That first (silent) sentence is
+  // played only when spoken replies are on and the mic is off: any sound while listening can make iOS
+  // mute the microphone. Returns true once unlocked.
   unlock() {
-    if (this.unlocked || !('speechSynthesis' in window)) return;
-    if (this.listening && !this.ready) return; // never while the mic is still starting up
+    if (this.unlocked || !('speechSynthesis' in window)) return !!this.unlocked;
+    if (!settings.voiceOut || this.listening) return false;
     this.unlocked = true;
+    this.log('app: unlocking speech output (silent, from your tap)');
     const u = new SpeechSynthesisUtterance(' ');
     u.volume = 0;
     u.onend = () => this.log('app: unlock sound finished');
     speechSynthesis.speak(u);
+    return true;
   }
 
-  // Once the mic is up, unlock speech output in the background so replies can be spoken.
-  unlockSoon() {
-    if (this.unlocked) return;
-    setTimeout(() => { if (!this.isSpeaking()) this.unlock(); }, 1500);
-  }
-
+  // iOS sometimes returns an empty voice list for a moment, and the reply would then switch to another
+  // voice. So the last full list is remembered and used whenever the browser briefly reports none.
   voices() {
-    return 'speechSynthesis' in window ? speechSynthesis.getVoices() : [];
+    if (!('speechSynthesis' in window)) return [];
+    const list = speechSynthesis.getVoices();
+    if (list.length) this.voiceCache = list;
+    return list.length ? list : this.voiceCache || [];
   }
 
   speak(text, why = 'reply') {
@@ -382,7 +390,8 @@ class Voice {
     u.volume = 1;
     const all = this.voices();
     const v = all.find((x) => x.name === settings.voiceName);
-    if (v) u.voice = v;
+    // a remembered voice the browser no longer accepts must never stop the reply: fall back to its language
+    if (v) { try { u.voice = v; } catch { this.log('app: voice not accepted, using its language', v.name); } }
     u.lang = v?.lang || navigator.language || 'en-US';
     // iOS sometimes leaves speech output paused, and then nothing is ever heard
     if (speechSynthesis.paused) { this.log('app: speech output was paused: resuming'); speechSynthesis.resume(); }
@@ -395,7 +404,7 @@ class Voice {
       // Listening keeps running (stopping and restarting it is what leaves iPad Safari deaf).
       // Instead, whatever the mic picks up while Claude talks is ignored: it is mostly Claude's own voice.
       this.mutedSpeech = true;
-      this.log('app: Claude speaking (listening continues, words ignored)', `"${String(text).slice(0, 40)}"`);
+      this.log(this.listening ? 'app: Claude speaking (mic stays on, words ignored meanwhile)' : 'app: Claude speaking', `"${String(text).slice(0, 40)}"`);
       emit('speaking', true);
     };
     const done = (e) => {
@@ -466,6 +475,11 @@ class Voice {
 }
 
 export const voice = new Voice();
+// fill the voice list early (iOS loads it lazily) and keep it up to date
+if ('speechSynthesis' in window) {
+  voice.voices();
+  try { speechSynthesis.addEventListener('voiceschanged', () => voice.voices()); } catch {}
+}
 
 // Page visibility changes affect Safari's recogniser, so they go in the voice log too.
 // Safari stops listening when the app goes to the background (and can't restart it there), so the mic is
