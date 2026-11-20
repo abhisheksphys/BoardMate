@@ -9,9 +9,28 @@ class Voice {
     this.supported = !!SR;
     this.listening = false;
     this.want = false; // continuous mode is on
-    this.final = '';
+    this.heard = ''; // text from earlier recognition runs that hasn't been sent yet
+    this.runText = ''; // everything the current run has recognised (final + still-changing words)
+    this.discard = false; // ignore late results from a run whose words were already sent
     this.pausedForSpeech = false;
     this.pushReleased = false;
+    this.lastSent = '';
+    this.lastSentAt = 0;
+  }
+
+  // Safari sometimes re-delivers the words you just said in its next listening run. Drop them.
+  withoutJustSent(text) {
+    if (!this.lastSent || Date.now() - this.lastSentAt > 6000) return text;
+    const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+    const words = text.split(/\s+/).filter(Boolean);
+    const n = this.lastSent.split(/\s+/).filter(Boolean).length;
+    if (words.length >= n && norm(words.slice(0, n).join(' ')) === norm(this.lastSent)) return words.slice(n).join(' ');
+    if (norm(this.lastSent).startsWith(norm(text))) return ''; // a partial repeat of what was sent
+    return text;
+  }
+
+  current() {
+    return `${this.heard} ${this.runText}`.replace(/\s+/g, ' ').trim();
   }
 
   makeRec() {
@@ -19,15 +38,18 @@ class Voice {
     r.lang = navigator.language || 'en-US';
     r.continuous = true;
     r.interimResults = true;
+    r.onstart = () => { this.runText = ''; this.discard = false; };
     r.onresult = (e) => {
+      if (this.discard) return;
       if (this.isSpeaking()) this.cancelSpeech(); // barge-in: you talk, it stops
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const res = e.results[i];
-        if (res.isFinal) this.final += res[0].transcript + ' ';
-        else interim += res[0].transcript;
-      }
-      emit('interim', (this.final + interim).trim());
+      // Rebuild from the whole result list each time: Safari re-sends and re-marks earlier words,
+      // so appending piece by piece duplicates or drops them.
+      let text = '';
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript + ' ';
+      this.runText = this.withoutJustSent(text.trim());
+      const shown = this.current();
+      if (!shown) return; // only words that were already sent: never show them again
+      emit('interim', shown); // the bar only ever grows while you speak; it is never blanked mid-sentence
       if (settings.voiceIn === 'continuous') {
         clearTimeout(this.timer);
         this.timer = setTimeout(() => this.flush(), 1400);
@@ -35,9 +57,12 @@ class Voice {
     };
     r.onend = () => {
       this.listening = false;
+      // Safari ends runs on its own after pauses; keep what it heard for the next run
+      if (!this.discard && this.runText) this.heard = this.current();
+      this.runText = '';
       emit('mic', this.state());
       if (this.pushReleased) { this.pushReleased = false; this.flush(); }
-      else if (this.want && !this.pausedForSpeech) setTimeout(() => this.startRec(), 250);
+      else if (this.want && !this.pausedForSpeech) setTimeout(() => this.startRec(), 200);
     };
     r.onerror = (e) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
@@ -71,7 +96,7 @@ class Voice {
   toggleContinuous() {
     this.want = !this.want;
     if (this.want) this.startRec();
-    else { this.stopRec(); this.flush(); }
+    else { this.flush(); this.stopRec(); }
     emit('mic', this.state());
   }
 
@@ -82,7 +107,8 @@ class Voice {
   }
 
   pushStart() {
-    this.final = '';
+    this.heard = '';
+    this.runText = '';
     this.want = false;
     this.cancelSpeech();
     this.startRec();
@@ -97,12 +123,22 @@ class Voice {
     }, 1500);
   }
 
+  // Sends everything heard so far, once: the bar hides and the same text appears in the panel.
   flush() {
     clearTimeout(this.timer);
-    let text = this.final.trim();
-    this.final = '';
+    let text = this.current();
+    this.heard = '';
+    this.runText = '';
     emit('interim', '');
     if (!text) return;
+    // Start a fresh run so Safari can't re-deliver the words just sent (that caused the re-flash).
+    if (this.listening && this.want) {
+      this.discard = true;
+      try { this.rec.abort(); } catch {}
+    }
+    if (text === this.lastSent && Date.now() - this.lastSentAt < 5000) return; // same words delivered twice
+    this.lastSent = text;
+    this.lastSentAt = Date.now();
     if (settings.voiceIn === 'continuous' && settings.wakeWord) {
       const w = settings.wakeWord.toLowerCase();
       const i = text.toLowerCase().indexOf(w);
