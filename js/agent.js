@@ -30,6 +30,7 @@ Answering
 - Put full answers in your text reply, shown in the side panel. Use Markdown with LaTeX: $...$ inline, $$...$$ display.
 - For any symbolic computation (curl, divergence, expanding, simplifying, solving, integrating, series, checking equalities) use the cas tool rather than doing the algebra in your head; then explain.
 - When the user asks you to write, continue, fill in, or put something on the board, use write_on_canvas${s.allowBoardWrite ? '' : ' (currently turned off: say so and answer in the panel)'}. Place it next to what it relates to. Keep board content short: equations and brief labels.
+- Text you write on the board is automatically sized to match the user's handwriting where it goes. If they ask for it bigger or smaller, use size_scale (new writing) or resize_board_block (something already written).
 - Use annotate to flag a specific spot (an error, a check, a note).
 - ${s.voiceOut ? 'Voice replies are ON: call speak with a short natural spoken version of your answer (1-3 sentences, no LaTeX, math in words), then give the full written answer.' : 'Voice replies are OFF: do not call speak unless asked.'}
 - Use search_library and show_page for the user's PDFs (the shared library plus this session's own materials).
@@ -120,7 +121,7 @@ export class Agent {
       session: this.sessions?.meta ? { title: this.sessions.meta.title, summary: this.sessions.meta.summary || undefined } : undefined,
       image: { width: snap.width, height: snap.height, note: 'All x,y for tools are pixels in the FIRST image.' },
       selection: selection ? b.rectToImage(snap, selection) : null,
-      your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
+      your_board_blocks: page.blocks.filter((x) => x.kind !== 'image').map((x) => ({ id: x.id, at: b.rectToImage(snap, { x: x.x, y: x.y, w: x.w || 0, h: x.h || 0 }), lines: x.lines })),
       notebook: page.notebook.slice(-40).map((e) => ({ key: e.key, latex: e.latex, description: e.description, at: Number.isFinite(e.x) ? b.worldToImage(snap, e.x, e.y) : null })),
       input: origin,
     };
@@ -242,10 +243,12 @@ export class Agent {
     const sel = b.selection;
     const cb = b.contentBounds();
     const vis = b.visibleWorld();
-    const pos = sel ? { x: sel.x + sel.w + 36, y: sel.y } : cb ? { x: cb.x + 10, y: cb.y + cb.h + 30 } : { x: vis.x + 60, y: vis.y + 60 };
+    const fontPx = b.aiFontSize(sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null, sel);
+    const gap = fontPx * 1.1;
+    const pos = sel ? { x: sel.x + sel.w + gap * 1.5, y: sel.y } : cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
     b.setLocked(true);
     try {
-      await b.addBlock({ lines, x: pos.x, y: pos.y }, { animateMs: settings.writeAnimationMs });
+      await b.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs });
     } finally {
       b.setLocked(false);
     }

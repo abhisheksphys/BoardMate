@@ -560,8 +560,74 @@ export class Board {
     if (op.remove) (reverse ? add : rem)(op.remove);
     if (op.move) {
       const b = P.blocks.find((x) => x.id === op.move.id);
-      if (b) Object.assign(b, reverse ? op.move.from : op.move.to);
+      if (b) {
+        const before = b.fontPx;
+        Object.assign(b, reverse ? op.move.from : op.move.to);
+        if (b.kind !== 'image' && b.fontPx !== before) { this.layouts.delete(b.id); this.layoutBlock(b); }
+      }
     }
+  }
+
+  // ---------- matching Claude's writing to yours ----------
+  // Typical height of your handwriting (in page units) where Claude is about to write.
+  // Looks, in order: inside your selection → your lines around/above that spot → your recent writing.
+  // Returns { fontPx, source } or null if there's no handwriting to go by.
+  writingSize(at, selection = null) {
+    const strokes = this.page.strokes;
+    if (!strokes.length) return null;
+    const center = (s) => { const b = strokeBBox(s); return { x: b.x + b.w / 2, y: b.y + b.h / 2 }; };
+    let pool = [], source = '';
+    if (selection) {
+      pool = strokes.filter((s) => { const c = center(s); return c.x >= selection.x && c.x <= selection.x + selection.w && c.y >= selection.y && c.y <= selection.y + selection.h; });
+      source = 'selection';
+    }
+    if (pool.length < 3 && at) {
+      // nearby: mostly the lines just above / beside the spot, closest first
+      const near = strokes
+        .map((s) => { const c = center(s); return { s, d: Math.hypot((c.x - at.x) * 0.5, (c.y - at.y) * (c.y > at.y + 40 ? 3 : 1)) }; })
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 12) // a word or two of the closest writing: enough to measure, without mixing in other lines
+        .map((x) => x.s);
+      if (near.length >= 3) { pool = near; source = 'nearby writing'; }
+    }
+    if (pool.length < 3) { pool = strokes.slice(-40); source = 'recent writing'; }
+    // character height ≈ median stroke height, ignoring dots and long flat strokes (fraction bars, underlines)
+    const hs = pool
+      .map((s) => { const b = strokeBBox(s); const pad = s.width * 1.5; return { h: b.h - 2 * pad, w: b.w - 2 * pad }; })
+      .filter((d) => d.h >= 4 && !(d.w > 4 * d.h && d.h < 10))
+      .map((d) => d.h)
+      .sort((a, b) => a - b);
+    if (hs.length < 2) return null;
+    const lo = Math.floor(hs.length * 0.15), hi = Math.ceil(hs.length * 0.85);
+    const core = hs.slice(lo, Math.max(lo + 1, hi));
+    const median = core[Math.floor(core.length / 2)];
+    // handwritten letters average about 0.6 of the typeset font size (between x-height and capital height)
+    const fontPx = Math.max(12, Math.min(96, median / 0.6));
+    return { fontPx, source };
+  }
+
+  // Size for a new block of Claude's: matched to your handwriting unless turned off, times the user's scale.
+  aiFontSize(at, selection = null, extraScale = 1) {
+    const base = settings.aiMatchSize !== false ? this.writingSize(at, selection)?.fontPx || 22 : 22;
+    const scale = Math.max(0.3, Math.min(3, (Number(settings.aiSizeScale) || 1) * (Number(extraScale) || 1)));
+    return Math.round(Math.max(10, Math.min(140, base * scale)) * 10) / 10;
+  }
+
+  // Resize one of Claude's blocks (or an image) by a factor, with undo.
+  async scaleBlock(id, factor) {
+    const b = this.page.blocks.find((x) => x.id === id);
+    if (!b || !(factor > 0)) return null;
+    const from = { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx };
+    if (b.kind === 'image') { b.w *= factor; b.h *= factor; }
+    else {
+      b.fontPx = Math.max(8, Math.min(160, (b.fontPx || 22) * factor));
+      this.layouts.delete(b.id);
+      await this.layoutBlock(b);
+    }
+    this.pushUndo({ move: { id: b.id, from, to: { x: b.x, y: b.y, w: b.w, h: b.h, fontPx: b.fontPx } } });
+    this.render();
+    this.saveSoon();
+    return b;
   }
 
   undo() {
@@ -702,8 +768,8 @@ export class Board {
     for (const b of this.page.blocks) if (!this.layouts.has(b.id)) this.layoutBlock(b);
   }
 
-  async addBlock({ lines = [], x, y, kind = 'math', src, w, h }, { animateMs = 0, signal, author = 'ai' } = {}) {
-    const b = { id: uid(), kind, x, y, lines: [], color: settings.aiColor, fontPx: 22, author, src, w, h };
+  async addBlock({ lines = [], x, y, kind = 'math', src, w, h, fontPx = 22 }, { animateMs = 0, signal, author = 'ai' } = {}) {
+    const b = { id: uid(), kind, x, y, lines: [], color: settings.aiColor, fontPx, author, src, w, h };
     this.page.blocks.push(b);
     if (kind === 'math' && animateMs > 0 && lines.length > 1) {
       for (const ln of lines) {

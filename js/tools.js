@@ -32,9 +32,15 @@ export const TOOL_SCHEMAS = [
         anchor: { type: 'string', enum: ['below_content', 'below_selection', 'right_of_selection', 'at_xy'] },
         x: { type: 'number' },
         y: { type: 'number' },
+        size_scale: { type: 'number', description: "Optional. The text is automatically sized to match the user's handwriting there; use e.g. 1.3 for larger or 0.8 for smaller only if the user asks." },
       },
       required: ['lines'],
     },
+  },
+  {
+    name: 'resize_board_block',
+    description: "Make one of your blocks on the board (or an image) bigger or smaller, e.g. when the user says \"make that bigger\". id from your_board_blocks; scale e.g. 1.25 or 0.8.",
+    input_schema: { type: 'object', properties: { id: { type: 'string' }, scale: { type: 'number' } }, required: ['id', 'scale'] },
   },
   {
     name: 'annotate',
@@ -172,19 +178,28 @@ export async function runTool(use, ctx) {
         const vis = board.visibleWorld();
         let pos;
         const anchor = inp.anchor || (Number.isFinite(inp.x) && Number.isFinite(inp.y) ? 'at_xy' : 'below_content');
+        // Size: matched to the handwriting it continues (selection → nearby lines → recent writing).
+        const sizeRef = anchor === 'at_xy' && snap && Number.isFinite(inp.x) ? board.imageToWorld(snap, inp.x, inp.y) : sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null;
+        const fontPx = board.aiFontSize(sizeRef, sel, inp.size_scale);
+        const gap = fontPx * 1.1;
         if (anchor === 'at_xy' && snap && Number.isFinite(inp.x) && Number.isFinite(inp.y)) pos = board.imageToWorld(snap, inp.x, inp.y);
-        else if (anchor === 'below_selection' && sel) pos = { x: sel.x, y: sel.y + sel.h + 24 };
-        else if (anchor === 'right_of_selection' && sel) pos = { x: sel.x + sel.w + 36, y: sel.y };
-        else pos = cb ? { x: cb.x + 10, y: cb.y + cb.h + 30 } : { x: vis.x + 60, y: vis.y + 60 };
+        else if (anchor === 'below_selection' && sel) pos = { x: sel.x, y: sel.y + sel.h + gap };
+        else if (anchor === 'right_of_selection' && sel) pos = { x: sel.x + sel.w + gap * 1.5, y: sel.y };
+        else pos = cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
         board.setLocked(true);
         try {
-          await board.addBlock({ lines, x: pos.x, y: pos.y }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
+          await board.addBlock({ lines, x: pos.x, y: pos.y, fontPx }, { animateMs: settings.writeAnimationMs, signal: agent.abort?.signal });
         } finally {
           board.setLocked(false);
         }
         if (settings.narration && settings.voiceOut && !agent.spokeThisTurn) voice.speak('Done, it is on the board.');
         const at = snap ? board.worldToImage(snap, pos.x, pos.y) : null;
         return ok(use.id, `Wrote ${lines.length} line(s) on the board${at ? ` at about (${at.x}, ${at.y}) in image pixels` : ''}.`);
+      }
+
+      case 'resize_board_block': {
+        const b = await board.scaleBlock(inp.id, Number(inp.scale));
+        return b ? ok(use.id, `Resized to ${Math.round((Number(inp.scale) || 1) * 100)}%.`) : fail(use.id, 'No block with that id on this page.');
       }
 
       case 'annotate': {

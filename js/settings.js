@@ -41,6 +41,8 @@ export const DEFAULTS = {
   // Board
   allowBoardWrite: true,
   writeAnimationMs: 200,
+  aiMatchSize: true, // size Claude's writing like your handwriting where it goes
+  aiSizeScale: 1, // then scale it (0.9 = a bit smaller, 1.1 = a bit larger)
   aiColor: '#1a5fd0',
   penColor: '#1d1d1f',
   penWidth: 2.4,
@@ -76,7 +78,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'liveSpeak',
   'voiceIn', 'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
+  'allowBoardWrite', 'writeAnimationMs', 'aiMatchSize', 'aiSizeScale', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 

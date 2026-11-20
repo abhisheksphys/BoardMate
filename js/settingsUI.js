@@ -35,6 +35,8 @@ const SECTIONS = [
   ]],
   ['Board', [
     { k: 'allowBoardWrite', label: 'Claude may write on the board', type: 'checkbox' },
+    { k: 'aiMatchSize', label: "Size Claude's writing to match my handwriting where it writes", type: 'checkbox' },
+    { k: 'aiSizeScale', label: "Claude's writing size relative to mine (1 = same, 0.9 = a bit smaller, 1.2 = larger)", type: 'number', step: 0.05 },
     { k: 'writeAnimationMs', label: 'Delay between written lines (ms)', type: 'number' },
     { k: 'aiColor', label: 'Claude colour', type: 'color' },
     { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
