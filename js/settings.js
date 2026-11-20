@@ -41,6 +41,11 @@ export const DEFAULTS = {
   aiColor: '#1a5fd0',
   penColor: '#1d1d1f',
   penWidth: 2.4,
+  recentColors: ['#1d1d1f', '#c0392b', '#1e7a46'],
+  inkSmoothing: 0.3, // 0 = raw Pencil input, higher = smoother but slightly softer corners (max 0.8)
+  inkPrediction: true, // draw a few milliseconds ahead of the Pencil tip where the browser supports it
+  eraserSize: 20, // diameter in on-screen pixels
+  eraserMode: 'partial', // partial = erase only what the circle touches | stroke = remove whole strokes
   fingerDraws: false,
   showMarks: true,
 
@@ -68,7 +73,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'liveSpeak',
   'voiceIn', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimationMs', 'aiColor', 'penColor', 'penWidth', 'fingerDraws', 'showMarks',
+  'allowBoardWrite', 'writeAnimationMs', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'fingerDraws', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 

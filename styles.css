@@ -57,6 +57,53 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 #toolbar .tool.active { background: var(--ink); color: #fff; }
 .swatch { width: 22px; height: 22px; padding: 0; border-radius: 50%; margin: 0 3px; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--line); }
 .swatch.active { box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px var(--ink); }
+#recentColors { display: inline-flex; align-items: center; }
+#recentColors .swatch { width: 18px; height: 18px; margin: 0 2px; }
+.tool-split { display: inline-flex; align-items: center; }
+#toolbar .more { padding: 6px 2px; margin-left: -2px; color: var(--muted); }
+#toolbar .more svg { width: 14px; height: 14px; }
+.eraser-sizes { display: flex; gap: 6px; margin-top: 10px; }
+.eraser-sizes button { flex: 1; height: 44px; border: 1px solid var(--line); border-radius: 9px; display: flex; align-items: center; justify-content: center; }
+.eraser-sizes button span { display: block; border-radius: 50%; border: 1.5px solid #8e8e93; background: rgba(120, 120, 128, 0.12); }
+.eraser-sizes button.active { border-color: var(--ink); background: var(--bg); }
+.segmented { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+.segmented button { flex: 1; font-size: 13px; padding: 7px 6px; border-radius: 8px; color: var(--muted); }
+.segmented button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+.ink-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 34px; }
+.ink-dot { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1.5px var(--ink); }
+
+/* pen options popover */
+.popover {
+  position: fixed;
+  z-index: 40;
+  width: 296px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.16);
+  padding: 6px 14px 14px;
+}
+.popover[hidden] { display: none; }
+.pop-section { padding-top: 10px; }
+.pop-section + .pop-section { border-top: 1px solid var(--line); margin-top: 12px; }
+.pop-title { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 8px; }
+#widthVal { font-variant-numeric: tabular-nums; color: var(--ink); }
+.width-row { display: flex; align-items: center; gap: 10px; }
+.w-small, .w-large { flex: none; border-radius: 50%; background: var(--ink); }
+.w-small { width: 4px; height: 4px; }
+.w-large { width: 14px; height: 14px; }
+#widthRange { flex: 1; accent-color: var(--ink); height: 28px; }
+#widthDemo { width: 100%; height: 44px; margin: 6px 0 4px; }
+#widthDemo path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.presets { display: flex; gap: 6px; }
+.presets button { flex: 1; height: 32px; border: 1px solid var(--line); border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 8px; }
+.presets button span { display: block; width: 100%; background: var(--ink); border-radius: 4px; }
+.presets button.active { border-color: var(--ink); background: var(--bg); }
+.palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; justify-items: center; }
+.palette .swatch { width: 26px; height: 26px; margin: 0; }
+.custom-color { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; position: relative; cursor: pointer; }
+.custom-color .spectrum { width: 24px; height: 24px; border-radius: 50%; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); flex: none; }
+.custom-color input[type=color] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
 .pages .label { font-weight: 600; min-width: 90px; }
 #attention { border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 5px 8px; margin-right: 4px; }
 .mic.on { background: var(--error) !important; color: #fff; }
@@ -67,6 +114,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 #stage { flex: 1; display: flex; min-height: 0; position: relative; }
 #boardWrap { flex: 1; position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
 #board { display: block; touch-action: none; }
+#boardWrap .live-layer { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; }
 
 #panel {
   width: var(--panel-w);

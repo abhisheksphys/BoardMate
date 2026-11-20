@@ -11,11 +11,13 @@ import { Changes } from './changes.js';
 import { SettingsUI } from './settingsUI.js';
 import { warmCas } from './cas.js';
 import { meter, fmt, overBudget } from './costs.js';
+import { initInkTools } from './inktools.js';
 
 const $ = (s) => document.querySelector(s);
 
 // ---------- core objects ----------
 const board = new Board($('#board'));
+window.liveBoard = board; // handy for debugging from the browser console
 let agent;
 const panel = new Panel({
   onSend: (text) => askFrom(text, 'typed'),
@@ -45,22 +47,24 @@ on('save', () => {
 });
 
 // ---------- toolbar ----------
+function selectTool(name) {
+  board.tool = name;
+  document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === name));
+  if (name !== 'select' && board.selection) { board.selection = null; board.render(); }
+  if (name !== 'eraser') { board.eraserCursor = null; board.render(); }
+}
+const ink = initInkTools({ selectPen: () => selectTool('pen'), selectEraser: () => selectTool('eraser') });
 document.querySelectorAll('[data-tool]').forEach((btn) =>
   btn.addEventListener('click', () => {
-    board.tool = btn.dataset.tool;
-    document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b === btn));
-    if (board.tool !== 'select' && board.selection) { board.selection = null; board.render(); }
+    // Tapping the eraser while it's already selected opens its size options (like GoodNotes).
+    if (btn.dataset.tool === 'eraser' && board.tool === 'eraser') {
+      const pop = $('#eraserPop');
+      if (pop.hidden) ink.openEraser(btn.parentElement); else pop.hidden = true;
+      return;
+    }
+    selectTool(btn.dataset.tool);
   }),
 );
-document.querySelectorAll('[data-color]').forEach((btn) => {
-  btn.style.background = btn.dataset.color;
-  btn.classList.toggle('active', btn.dataset.color === settings.penColor);
-  btn.addEventListener('click', () => {
-    setSettings({ penColor: btn.dataset.color });
-    document.querySelectorAll('[data-color]').forEach((b) => b.classList.toggle('active', b === btn));
-    $('[data-tool="pen"]').click();
-  });
-});
 $('#undo').addEventListener('click', () => board.undo());
 $('#redo').addEventListener('click', () => board.redo());
 $('#pagePrev').addEventListener('click', () => board.goto(board.pi - 1));

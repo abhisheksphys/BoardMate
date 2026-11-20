@@ -29,16 +29,19 @@
       <button data-tool="pen" class="tool active" title="Pen (P)" aria-label="Pen">
         <svg viewBox="0 0 24 24"><path d="M4 20l1-5L16 4l4 4L9 19z"/><path d="M14 6l4 4"/></svg>
       </button>
-      <button data-tool="eraser" class="tool" title="Eraser (E)" aria-label="Eraser">
-        <svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M5 15l9-9 5 5-8 8H8z"/></svg>
-      </button>
+      <span class="tool-split">
+        <button data-tool="eraser" class="tool" title="Eraser (E) — tap again for size" aria-label="Eraser">
+          <svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M5 15l9-9 5 5-8 8H8z"/></svg>
+        </button>
+        <button id="eraserMore" class="more" title="Eraser size" aria-label="Eraser options"><svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></button>
+      </span>
       <button data-tool="select" class="tool" title="Select a region / move Claude's blocks (S)" aria-label="Select">
         <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4" /></svg>
       </button>
       <span class="sep"></span>
-      <button class="swatch" data-color="#1d1d1f" aria-label="Black ink"></button>
-      <button class="swatch" data-color="#c0392b" aria-label="Red ink"></button>
-      <button class="swatch" data-color="#1e7a46" aria-label="Green ink"></button>
+      <button id="colorBtn" class="ink-btn" title="Ink colour" aria-label="Ink colour"><span class="ink-dot"></span></button>
+      <span id="recentColors"></span>
+      <button id="widthBtn" class="ink-btn" title="Stroke thickness" aria-label="Stroke thickness"><svg viewBox="0 0 24 24"><path id="widthIcon" d="M4 16c3-6 6-8 8-4s5 2 8-4"/></svg></button>
       <span class="sep"></span>
       <button id="undo" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 7H4V2"/><path d="M4 7a9 9 0 1 1-1 7"/></svg></button>
       <button id="redo" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 7h5V2"/><path d="M20 7a9 9 0 1 0 1 7"/></svg></button>
@@ -95,6 +98,47 @@
       <div id="floatGrip" title="Drag to resize" aria-hidden="true"></div>
     </aside>
   </main>
+
+  <div id="inkPop" class="popover" hidden>
+    <div class="pop-section">
+      <div class="pop-title">Thickness <span id="widthVal"></span></div>
+      <div class="width-row">
+        <span class="w-small"></span>
+        <input type="range" id="widthRange" min="0.5" max="14" step="0.1" aria-label="Stroke thickness">
+        <span class="w-large"></span>
+      </div>
+      <svg id="widthDemo" viewBox="0 0 240 44" aria-hidden="true"><path d="M12 30c30-26 52-26 70-8s44 18 66-6 50-14 80 2"/></svg>
+      <div class="presets" id="widthPresets"></div>
+    </div>
+    <div class="pop-section">
+      <div class="pop-title">Colour</div>
+      <div class="palette" id="palette"></div>
+      <label class="custom-color">
+        <span class="spectrum"></span>
+        <span>Any colour…</span>
+        <input type="color" id="colorInput" aria-label="Pick any colour">
+      </label>
+    </div>
+  </div>
+
+  <div id="eraserPop" class="popover" hidden>
+    <div class="pop-section">
+      <div class="pop-title">Eraser size <span id="eraserVal"></span></div>
+      <div class="width-row">
+        <span class="w-small"></span>
+        <input type="range" id="eraserRange" min="4" max="90" step="1" aria-label="Eraser size">
+        <span class="w-large"></span>
+      </div>
+      <div class="eraser-sizes" id="eraserPresets"></div>
+    </div>
+    <div class="pop-section">
+      <div class="pop-title">Erases</div>
+      <div class="segmented" id="eraserMode">
+        <button type="button" data-mode="partial">Only what it touches</button>
+        <button type="button" data-mode="stroke">Whole strokes</button>
+      </div>
+    </div>
+  </div>
 
   <dialog id="settingsDlg"></dialog>
 </body>

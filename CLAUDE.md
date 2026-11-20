@@ -12,6 +12,7 @@ A personal handwriting whiteboard. Claude watches the page (images), listens (sp
 - `index.html`, `styles.css` — layout and look.
 - `js/app.js` — wiring: toolbar, mic, events, startup.
 - `js/board.js` — canvas: strokes, eraser, select/move, pan/zoom, pages, undo, AI blocks, marks, `snapshot()` for Claude.
+- `js/inktools.js` — toolbar pen options: thickness slider/presets, colour palette, system colour picker, recent colours.
 - `js/mathrender.js` — LaTeX → image (MathJax SVG) for AI blocks.
 - `js/agent.js` — main assistant loop and system prompt; sends page image + context with every question.
 - `js/tools.js` — tool schemas and handlers Claude can call (cas, write_on_canvas, annotate, get_region, speak, notebook_update, update_settings, save_action, search_library, show_page, log_friction, propose_code_change, ship_change, roll_back).

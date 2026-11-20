@@ -20,22 +20,98 @@ export function strokeBBox(s) {
   return s._bb;
 }
 
-function drawStroke(ctx, s) {
+// Cuts the part of stroke s that lies inside circle (c, r). Returns null if the circle doesn't touch it,
+// otherwise the remaining pieces (possibly none). Cuts land exactly on the circle edge, so erasing looks natural.
+export function clipStroke(s, c, r) {
   const pts = s.points;
-  if (pts.length < 2) return;
-  ctx.strokeStyle = s.color;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  let m0 = pts[0];
+  const r2 = r * r;
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  let touched = false;
+  const pieces = [];
+  let cur = [];
+  if ((pts[0][0] - c.x) ** 2 + (pts[0][1] - c.y) ** 2 < r2) touched = true;
+  else cur.push(pts[0]);
   for (let i = 1; i < pts.length; i++) {
-    const p = pts[i];
-    const m1 = i < pts.length - 1 ? [(p[0] + pts[i + 1][0]) / 2, (p[1] + pts[i + 1][1]) / 2] : p;
-    ctx.lineWidth = s.width * (0.55 + 0.9 * (p[2] ?? 0.5));
+    const a = pts[i - 1], b = pts[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1], fx = a[0] - c.x, fy = a[1] - c.y;
+    const A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - r2;
+    let t0 = 1, t1 = 0;
+    if (A > 1e-9) {
+      const disc = B * B - 4 * A * C;
+      if (disc > 0) { const sq = Math.sqrt(disc); t0 = (-B - sq) / (2 * A); t1 = (-B + sq) / (2 * A); }
+    } else if (C < 0) { t0 = 0; t1 = 1; }
+    const enter = Math.max(0, t0), exit = Math.min(1, t1);
+    if (enter < exit) {
+      touched = true;
+      if (enter > 0) cur.push(lerp(a, b, enter));
+      if (cur.length) pieces.push(cur);
+      cur = exit < 1 ? [lerp(a, b, exit), b] : [];
+    } else {
+      cur.push(b);
+    }
+  }
+  if (cur.length) pieces.push(cur);
+  if (!touched) return null;
+  return pieces
+    .filter((p) => p.length >= 2 && p.some((q, i) => i && Math.hypot(q[0] - p[0][0], q[1] - p[0][1]) > 0.3))
+    .map((points) => ({ id: uid(), points: points.map((q) => [r1(q[0]), r1(q[1]), q[2]]), color: s.color, width: s.width }));
+}
+
+const halfWidth = (s, p) => (s.width * (0.55 + 0.9 * (p ?? 0.5))) / 2;
+
+// Path through points, smoothed with quadratic curves between midpoints.
+function smoothThrough(ctx, P, start) {
+  if (start) ctx.moveTo(P[0][0], P[0][1]);
+  else ctx.lineTo(P[0][0], P[0][1]);
+  for (let i = 1; i < P.length - 1; i++) ctx.quadraticCurveTo(P[i][0], P[i][1], (P[i][0] + P[i + 1][0]) / 2, (P[i][1] + P[i + 1][1]) / 2);
+  ctx.lineTo(P[P.length - 1][0], P[P.length - 1][1]);
+}
+
+// Draws a stroke as ONE filled outline with pressure-varying width and round ends (how ink apps render),
+// instead of many small overlapping segments. `extra` = predicted points shown ahead of the Pencil tip.
+export function drawStroke(ctx, s, extra) {
+  const pts = extra?.length ? s.points.concat(extra) : s.points;
+  const n = pts.length;
+  if (!n) return;
+  ctx.fillStyle = s.color;
+  if (n < 3) {
+    ctx.strokeStyle = s.color;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = halfWidth(s, pts[0][2]) * 2;
     ctx.beginPath();
-    ctx.moveTo(m0[0], m0[1]);
-    ctx.quadraticCurveTo(p[0], p[1], m1[0], m1[1]);
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    ctx.lineTo(pts[n - 1][0], pts[n - 1][1]);
     ctx.stroke();
-    m0 = m1;
+    return;
+  }
+  const L = [], R = [], corners = [];
+  let pdx = 0, pdy = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    const r = halfWidth(s, pts[i][2]);
+    L.push([pts[i][0] - dy * r, pts[i][1] + dx * r]);
+    R.push([pts[i][0] + dy * r, pts[i][1] - dx * r]);
+    if (i > 1 && dx * pdx + dy * pdy < 0.6) corners.push([pts[i - 1], halfWidth(s, pts[i - 1][2])]); // sharp turn
+    pdx = dx; pdy = dy;
+  }
+  const end = pts[n - 1], start = pts[0];
+  const aEnd = Math.atan2(L[n - 1][1] - end[1], L[n - 1][0] - end[0]);
+  const aStart = Math.atan2(R[0][1] - start[1], R[0][0] - start[0]);
+  ctx.beginPath();
+  smoothThrough(ctx, L, true);
+  ctx.arc(end[0], end[1], halfWidth(s, end[2]), aEnd, aEnd - Math.PI, true); // round end
+  smoothThrough(ctx, R.reverse(), false);
+  ctx.arc(start[0], start[1], halfWidth(s, start[2]), aStart, aStart - Math.PI, true); // round start
+  ctx.closePath();
+  ctx.fill();
+  // fill sharp corners so the outline never shows a notch
+  for (const [p, r] of corners) {
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -69,6 +145,15 @@ export class Board {
   constructor(canvas) {
     this.c = canvas;
     this.ctx = canvas.getContext('2d');
+    // Live layer on top: the stroke being drawn, eraser circle, selection, marks. Redrawing it is cheap,
+    // so the page layer underneath is only touched when ink is committed or the view changes.
+    this.o = document.createElement('canvas');
+    this.o.className = 'live-layer';
+    canvas.after(this.o);
+    this.octx = this.o.getContext('2d', { desynchronized: true }) || this.o.getContext('2d');
+    this.pendingRegion = null;
+    this.pendingStrokes = [];
+    this.needFull = false;
     this.pages = [];
     this.pi = 0;
     this.tool = 'pen';
@@ -126,6 +211,10 @@ export class Board {
     this.c.height = Math.max(1, Math.round(r.height * this.dpr));
     this.c.style.width = r.width + 'px';
     this.c.style.height = r.height + 'px';
+    this.o.width = this.c.width;
+    this.o.height = this.c.height;
+    this.o.style.width = r.width + 'px';
+    this.o.style.height = r.height + 'px';
     if (this.page) this.render();
   }
 
@@ -184,6 +273,7 @@ export class Board {
     c.addEventListener('pointerup', (e) => this.onUp(e, false));
     c.addEventListener('pointercancel', (e) => this.onUp(e, true));
     c.addEventListener('contextmenu', (e) => e.preventDefault());
+    c.addEventListener('pointerleave', () => { if (!this.drawing && this.eraserCursor) { this.eraserCursor = null; this.renderLive(); } });
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
       const { sx, sy } = this.evtPos(e);
@@ -228,14 +318,15 @@ export class Board {
     if (this.tool === 'pen') {
       this.drawing = { ...base, stroke: { id: uid(), points: [[r1(w.x), r1(w.y), e.pressure || 0.5]], color: settings.penColor, width: settings.penWidth } };
     } else if (this.tool === 'eraser') {
-      this.drawing = { ...base, erase: true, removed: { strokes: [], blocks: [], marks: [] } };
+      this.drawing = { ...base, erase: true, removed: { strokes: [], blocks: [], marks: [] }, added: new Map(), dirty: null };
+      this.eraserCursor = w;
       this.eraseAt(w);
     } else if (this.tool === 'select') {
       const b = this.hitBlock(w);
       if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w };
       else this.drawing = { ...base, sel: { x0: w.x, y0: w.y } };
     }
-    this.render();
+    this.renderLive();
   }
 
   onMove(e) {
@@ -245,17 +336,33 @@ export class Board {
       return;
     }
     const d = this.drawing;
-    if (!d || d.pointerId !== e.pointerId) return;
+    if (!d || d.pointerId !== e.pointerId) {
+      // Pencil hover / mouse: show the eraser circle before touching down.
+      if (!d && this.tool === 'eraser' && e.pointerType !== 'touch') {
+        const p = this.evtPos(e);
+        this.eraserCursor = this.toWorld(p.sx, p.sy);
+        this.renderLive();
+      }
+      return;
+    }
+    // Coalesced events: every sample the Pencil produced since the last frame (up to 240 per second).
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     for (const ev of evs.length ? evs : [e]) {
       const p = this.evtPos(ev);
       const w = this.toWorld(p.sx, p.sy);
-      if (d.stroke) this.addPoint(d.stroke, w, ev.pressure);
-      else if (d.erase) this.eraseAt(w);
+      if (d.stroke) this.addPoint(d.stroke, w, ev.pressure, true);
+      else if (d.erase) { this.eraserCursor = w; this.eraseAt(w); }
       else if (d.move) { d.move.x = d.from.x + w.x - d.start.x; d.move.y = d.from.y + w.y - d.start.y; }
       else if (d.sel) { d.sel.x1 = w.x; d.sel.y1 = w.y; }
     }
-    this.render();
+    if (d.stroke) {
+      // Predicted events: where the Pencil is about to be. Drawn ahead of the tip (never saved) to hide latency.
+      const pred = settings.inkPrediction && e.getPredictedEvents ? e.getPredictedEvents() : [];
+      const last = d.stroke.points[d.stroke.points.length - 1];
+      d.predicted = pred.slice(0, 3).map((ev) => { const p = this.evtPos(ev); const w = this.toWorld(p.sx, p.sy); return [w.x, w.y, last[2]]; });
+    }
+    if (d.move) this.render();
+    else this.renderLive();
   }
 
   onUp(e, cancelled) {
@@ -274,19 +381,19 @@ export class Board {
       const p = this.evtPos(e);
       this.addPoint(d.stroke, this.toWorld(p.sx, p.sy), e.pressure);
       // If iOS cancelled the touch, keep whatever was drawn rather than dropping it.
-      if (cancelled && d.stroke.points.length < 2) { this.drawing = null; this.render(); return; }
+      if (cancelled && d.stroke.points.length < 2) { this.drawing = null; this.renderLive(); return; }
       this.finishStroke(d);
       return;
     }
     this.drawing = null;
     if (d.erase) {
+      if (e.pointerType === 'pen') this.eraserCursor = null; // hover will bring it back if supported
       const r = d.removed;
-      if (r.strokes.length || r.blocks.length || r.marks.length) {
-        this.pushUndo({ remove: r });
-        let bb = null;
-        for (const s of r.strokes) bb = union(bb, strokeBBox(s));
-        for (const b of r.blocks) bb = union(bb, { x: b.x, y: b.y, w: b.w || 1, h: b.h || 1 });
-        if (bb) this.markDirty(bb);
+      const added = [...d.added.values()];
+      if (r.strokes.length || r.blocks.length || r.marks.length || added.length) {
+        // One undo step restores everything this erase gesture changed.
+        this.pushUndo({ remove: r, add: { strokes: added } });
+        if (d.dirty) this.markDirty(d.dirty);
       }
     } else if (d.move) {
       if (d.move.x !== d.from.x || d.move.y !== d.from.y) {
@@ -298,15 +405,22 @@ export class Board {
       this.selection = big ? normRect(s.x0, s.y0, s.x1, s.y1) : null;
       emit('selection', this.selection);
     }
-    this.render();
+    if (d.move) this.render();
+    else this.renderLive();
     this.saveSoon();
   }
 
-  addPoint(s, w, pressure) {
+  // smooth = light low-pass filter on position and pressure (removes hand/sensor jitter);
+  // the pen-up point is added unsmoothed so the stroke ends exactly where the Pencil lifted.
+  addPoint(s, w, pressure, smooth = false) {
     const last = s.points[s.points.length - 1];
-    if (Math.hypot(w.x - last[0], w.y - last[1]) <= 0.6 / this.page.view.z) return;
+    const k = smooth ? Math.max(0, Math.min(0.8, settings.inkSmoothing ?? 0.3)) : 0;
+    const x = last[0] + (w.x - last[0]) * (1 - k);
+    const y = last[1] + (w.y - last[1]) * (1 - k);
+    if (Math.hypot(x - last[0], y - last[1]) <= 0.6 / this.page.view.z) return;
     // pen-up reports pressure 0; reuse the last pressure so the stroke end doesn't thin out
-    s.points.push([r1(w.x), r1(w.y), pressure > 0 ? pressure : last[2]]);
+    const p = pressure > 0 ? last[2] * k + pressure * (1 - k) : last[2];
+    s.points.push([r1(x), r1(y), Math.round(p * 1000) / 1000]);
   }
 
   finishStroke(d) {
@@ -316,7 +430,7 @@ export class Board {
     this.page.strokes.push(s);
     this.pushUndo({ add: { strokes: [s] } });
     this.markDirty(strokeBBox(s));
-    this.render();
+    this.commitToPage(s); // drawn onto the page once; nothing else is redrawn
     this.saveSoon();
   }
 
@@ -435,23 +549,60 @@ export class Board {
     return this.page.marks.find((m) => Math.hypot(m.x - w.x, m.y - w.y) < r) || null;
   }
 
+  eraserRadius() {
+    return (settings.eraserSize || 20) / 2 / this.page.view.z; // size is on-screen pixels, whatever the zoom
+  }
+
+  // Erases along the path from the previous eraser position, so fast movements leave no gaps.
   eraseAt(w) {
-    const P = this.page, d = this.drawing;
-    const r = 10 / P.view.z;
-    const hit = P.strokes.filter((s) => {
-      const bb = strokeBBox(s);
-      if (w.x < bb.x - r || w.x > bb.x + bb.w + r || w.y < bb.y - r || w.y > bb.y + bb.h + r) return false;
-      return s.points.some((p) => Math.hypot(p[0] - w.x, p[1] - w.y) < r + s.width);
-    });
-    if (hit.length) {
-      const ids = new Set(hit.map((s) => s.id));
-      P.strokes = P.strokes.filter((s) => !ids.has(s.id));
-      d.removed.strokes.push(...hit);
+    const d = this.drawing;
+    const r = this.eraserRadius();
+    const prev = d.last || w;
+    d.last = w;
+    const steps = Math.max(1, Math.ceil(Math.hypot(w.x - prev.x, w.y - prev.y) / (r * 0.5)));
+    for (let i = 1; i <= steps; i++) {
+      this.eraseCircle({ x: prev.x + ((w.x - prev.x) * i) / steps, y: prev.y + ((w.y - prev.y) * i) / steps }, r, d);
     }
-    const b = this.hitBlock(w);
-    if (b) { P.blocks = P.blocks.filter((x) => x !== b); d.removed.blocks.push(b); }
-    const m = this.page.marks.find((mm) => Math.hypot(mm.x - w.x, mm.y - w.y) < 14 / P.view.z);
-    if (m) { P.marks = P.marks.filter((x) => x !== m); d.removed.marks.push(m); }
+  }
+
+  eraseCircle(c, r, d) {
+    const P = this.page;
+    const whole = settings.eraserMode === 'stroke';
+    const keep = [];
+    let changed = false;
+    let region = null;
+    for (const s of P.strokes) {
+      const bb = strokeBBox(s);
+      const rr = r + s.width * 0.5;
+      // cheap rejection: only strokes whose box is near the circle are examined
+      if (c.x < bb.x - rr || c.x > bb.x + bb.w + rr || c.y < bb.y - rr || c.y > bb.y + bb.h + rr) { keep.push(s); continue; }
+      const pieces = clipStroke(s, c, rr);
+      if (!pieces) { keep.push(s); continue; }
+      changed = true;
+      d.dirty = union(d.dirty, bb);
+      // a piece made earlier in this same gesture just disappears; an original stroke is remembered for undo
+      if (d.added.has(s.id)) d.added.delete(s.id);
+      else d.removed.strokes.push(s);
+      if (!whole) for (const p of pieces) { keep.push(p); d.added.set(p.id, p); }
+      // only the part of the page the eraser touched is redrawn
+      const m = s.width * 1.5 + 2 / P.view.z;
+      region = union(region, whole ? bb : { x: c.x - rr - m, y: c.y - rr - m, w: 2 * (rr + m), h: 2 * (rr + m) });
+    }
+    if (changed) { P.strokes = keep; this.renderRegion(region); }
+
+    // Claude's typeset blocks and margin marks go whole when touched.
+    for (const b of [...P.blocks]) {
+      const nx = Math.max(b.x, Math.min(c.x, b.x + (b.w || 1))), ny = Math.max(b.y, Math.min(c.y, b.y + (b.h || 1)));
+      if (Math.hypot(nx - c.x, ny - c.y) < r) {
+        P.blocks = P.blocks.filter((x) => x !== b);
+        d.removed.blocks.push(b);
+        this.render();
+        d.dirty = union(d.dirty, { x: b.x, y: b.y, w: b.w || 1, h: b.h || 1 });
+      }
+    }
+    for (const m of [...P.marks]) {
+      if (Math.hypot(m.x - c.x, m.y - c.y) < r + 8 / P.view.z) { P.marks = P.marks.filter((x) => x !== m); d.removed.marks.push(m); }
+    }
   }
 
   // ---------- AI blocks ----------
@@ -532,21 +683,21 @@ export class Board {
     this.locked = v;
     if (v) this.drawing = null;
     emit('lock', v);
-    this.render();
+    this.renderLive();
   }
 
   // ---------- marks & notebook ----------
   addMark(m) {
     const mk = { id: uid(), src: 'chat', ...m };
     this.page.marks.push(mk);
-    this.render();
+    this.renderLive();
     this.saveSoon();
     return mk;
   }
 
   replaceMarks(src, marks) {
     this.page.marks = this.page.marks.filter((m) => m.src !== src).concat(marks.map((m) => ({ id: uid(), src, ...m })));
-    this.render();
+    this.renderLive();
     this.saveSoon();
   }
 
@@ -600,25 +751,101 @@ export class Board {
   }
 
   // ---------- rendering ----------
-  render() {
+  // Three kinds of update, batched into one animation frame:
+  //  render()          – whole page (view changed, undo, page switch…), culled to what is visible;
+  //  renderRegion(r)   – only a rectangle of the page (erasing);
+  //  renderLive()      – only the live layer (the stroke being drawn, cursors), the page is untouched.
+  // A finished stroke is drawn onto the page once (commitToPage), never by redrawing everything.
+  render() { this.needFull = true; this.schedule(); }
+  renderLive() { this.schedule(); }
+  renderRegion(r) { this.pendingRegion = union(this.pendingRegion, r); this.schedule(); }
+  commitToPage(s) { this.pendingStrokes.push(s); this.schedule(); }
+
+  schedule() {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => {
       this.raf = null;
-      if (this.page) this.draw(this.ctx, this.page.view, this.dpr, true);
+      if (!this.page) return;
+      const v = this.page.view;
+      if (this.needFull) {
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillRect(0, 0, this.c.width, this.c.height);
+        this.drawContent(this.ctx, v, this.dpr, null, true);
+      } else {
+        if (this.pendingRegion) this.redrawRegion(this.pendingRegion);
+        if (this.pendingStrokes.length) {
+          this.ctx.setTransform(this.dpr * v.z, 0, 0, this.dpr * v.z, this.dpr * v.ox, this.dpr * v.oy);
+          for (const s of this.pendingStrokes) drawStroke(this.ctx, s);
+        }
+      }
+      this.needFull = false;
+      this.pendingRegion = null;
+      this.pendingStrokes = [];
+      this.drawLive();
     });
   }
 
-  draw(ctx, view, scale, live) {
+  redrawRegion(r) {
+    const v = this.page.view, ctx = this.ctx;
+    const pad = 4 / v.z;
+    const rr = { x: r.x - pad, y: r.y - pad, w: r.w + 2 * pad, h: r.h + 2 * pad };
+    ctx.save();
+    ctx.setTransform(this.dpr * v.z, 0, 0, this.dpr * v.z, this.dpr * v.ox, this.dpr * v.oy);
+    ctx.beginPath();
+    ctx.rect(rr.x, rr.y, rr.w, rr.h);
+    ctx.clip();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(rr.x, rr.y, rr.w, rr.h);
+    this.drawContent(ctx, v, this.dpr, rr, true);
+    ctx.restore();
+  }
+
+  // Draws page content (grid, Claude's blocks, ink) that intersects `area` (default: what the canvas shows).
+  drawContent(ctx, view, scale, area, grid) {
+    ctx.setTransform(scale * view.z, 0, 0, scale * view.z, scale * view.ox, scale * view.oy);
+    const vis = area || { x: -view.ox / view.z, y: -view.oy / view.z, w: ctx.canvas.width / (scale * view.z), h: ctx.canvas.height / (scale * view.z) };
+    const meets = (b) => b.x < vis.x + vis.w && b.x + b.w > vis.x && b.y < vis.y + vis.h && b.y + b.h > vis.y;
+    if (grid) this.drawGrid(ctx, view, vis);
+    for (const b of this.page.blocks) if (meets({ x: b.x - 12, y: b.y, w: (b.w || 200) + 12, h: b.h || 40 })) this.drawBlock(ctx, b);
+    for (const s of this.page.strokes) if (meets(strokeBBox(s))) drawStroke(ctx, s);
+  }
+
+  // Snapshot for Claude (no grid, no marks).
+  draw(ctx, view, scale) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    this.drawContent(ctx, view, scale, null, false);
+  }
+
+  drawLive() {
+    const ctx = this.octx, view = this.page.view, scale = this.dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.o.width, this.o.height);
     ctx.setTransform(scale * view.z, 0, 0, scale * view.z, scale * view.ox, scale * view.oy);
-    if (live) this.drawGrid(ctx, view);
-    for (const b of this.page.blocks) this.drawBlock(ctx, b, live);
-    for (const s of this.page.strokes) drawStroke(ctx, s);
-    if (!live) return;
-    if (this.drawing?.stroke) drawStroke(ctx, this.drawing.stroke);
+    if (this.drawing?.stroke) drawStroke(ctx, this.drawing.stroke, this.drawing.predicted);
+    if (this.drawing?.move) {
+      const b = this.drawing.move;
+      ctx.save();
+      ctx.strokeStyle = '#1a5fd0';
+      ctx.lineWidth = 1 / view.z;
+      ctx.strokeRect(b.x - 4, b.y - 4, (b.w || 100) + 8, (b.h || 30) + 8);
+      ctx.restore();
+    }
     if (settings.showMarks) for (const m of this.page.marks) drawMark(ctx, m, view.z);
+    if (this.tool === 'eraser' && this.eraserCursor) {
+      const ec = this.eraserCursor;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ec.x, ec.y, this.eraserRadius(), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(120,120,128,0.10)';
+      ctx.fill();
+      ctx.lineWidth = 1.25 / view.z;
+      ctx.strokeStyle = 'rgba(60,60,67,0.55)';
+      ctx.stroke();
+      ctx.restore();
+    }
     const sel = this.drawing?.sel?.x1 !== undefined ? normRect(this.drawing.sel.x0, this.drawing.sel.y0, this.drawing.sel.x1, this.drawing.sel.y1) : this.selection;
     if (sel) {
       ctx.save();
@@ -640,9 +867,8 @@ export class Board {
     }
   }
 
-  drawGrid(ctx, view) {
+  drawGrid(ctx, view, vis) {
     if (view.z < 0.45) return;
-    const vis = this.visibleWorld();
     const step = 40;
     ctx.fillStyle = '#d9dce1';
     const r = 1.1 / view.z;
@@ -650,7 +876,7 @@ export class Board {
       for (let y = Math.floor(vis.y / step) * step; y < vis.y + vis.h; y += step) ctx.fillRect(x - r / 2, y - r / 2, r, r);
   }
 
-  drawBlock(ctx, b, live) {
+  drawBlock(ctx, b) {
     const lay = this.layouts.get(b.id);
     if (b.kind !== 'image') {
       ctx.fillStyle = b.color + '55';
@@ -672,13 +898,6 @@ export class Board {
         ctx.textBaseline = 'top';
         ctx.fillText(it.text, b.x + it.x, b.y + it.y + it.fontPx * 0.1);
       }
-    }
-    if (live && this.drawing?.move === b) {
-      ctx.save();
-      ctx.strokeStyle = '#1a5fd0';
-      ctx.lineWidth = 1 / this.page.view.z;
-      ctx.strokeRect(b.x - 4, b.y - 4, lay.w + 8, lay.h + 8);
-      ctx.restore();
     }
   }
 }

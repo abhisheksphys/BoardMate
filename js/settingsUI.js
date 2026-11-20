@@ -34,6 +34,8 @@ const SECTIONS = [
     { k: 'writeAnimationMs', label: 'Delay between written lines (ms)', type: 'number' },
     { k: 'aiColor', label: 'Claude colour', type: 'color' },
     { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
+    { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
+    { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },
     { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
     { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
   ]],
