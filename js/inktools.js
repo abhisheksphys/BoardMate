@@ -98,6 +98,7 @@ export function initInkTools({ selectPen, selectEraser }) {
     const m = e.target.closest('[data-mode]');
     if (m) setSettings({ eraserMode: m.dataset.mode });
   });
+  $('#eraserBlocks').addEventListener('change', (e) => setSettings({ eraserBlocks: e.target.checked }));
 
   // ---------- reflect current settings ----------
   function refresh() {
@@ -121,6 +122,7 @@ export function initInkTools({ selectPen, selectEraser }) {
     erRange.value = String(es);
     erPop.pop.querySelectorAll('[data-esize]').forEach((b) => b.classList.toggle('active', Math.abs(+b.dataset.esize - es) < 1));
     erPop.pop.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === settings.eraserMode));
+    $('#eraserBlocks').checked = !!settings.eraserBlocks;
   }
 
   on('settings', refresh);

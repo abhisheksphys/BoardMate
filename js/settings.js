@@ -81,6 +81,7 @@ export const DEFAULTS = {
   inkPrediction: true, // draw a few milliseconds ahead of the Pencil tip where the browser supports it
   eraserSize: 20, // diameter in on-screen pixels
   eraserMode: 'partial', // partial = erase only what the circle touches | stroke = remove whole strokes
+  eraserBlocks: false, // the eraser also removes Claude's blocks and pasted pictures (off: only your ink and marks)
   paper: 'dots', // plain | dots | ruled | grid: for new pages, and pages that haven't picked their own
   paperSpacing: 40, // distance between lines or dots
   fingerDraws: false,
@@ -116,7 +117,7 @@ export const DEFAULTS = {
 export const AI_EDITABLE = [
   'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'writeStyle', 'textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'writeMargin', 'writeMarginV', 'blockPadding', 'blockGap', 'hangIndent', 'markTap', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
-  'allowBoardWrite', 'writeAnimation', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
+  'allowBoardWrite', 'writeAnimation', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'eraserBlocks', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
 ];
 

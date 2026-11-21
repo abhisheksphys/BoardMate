@@ -559,3 +559,11 @@ dialog.pages-sheet[open] { display: flex; }
 .ps-writing input[type=color] { width: 84px; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--surface); }
 .ps-writing input[hidden] { visibility: hidden; display: block; }
 .ps-sep { border-top: 1px solid var(--line); margin: 4px 0; }
+
+/* the bar over a selected block (Select tool) */
+.block-bar { position: absolute; z-index: 14; display: flex; gap: 2px; padding: 4px; border-radius: 12px; background: #1d1d1f; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.block-bar[hidden] { display: none; }
+.block-bar button { padding: 7px 12px; border-radius: 8px; background: transparent; color: #fff; font-size: 14px; font-weight: 550; }
+.block-bar button:active { background: rgba(255,255,255,.16); }
+.block-bar button.danger { color: #ff8a80; }
+.pop-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; }

@@ -71,6 +71,7 @@ const SECTIONS = [
     { k: 'writeAnimation', label: 'How Claude\'s writing appears', type: 'select', options: [['write', 'Written: each line drawn left to right, like a pen'], ['fade', 'Fade in: line by line'], ['lines', 'Line by line: each line appears at once'], ['off', 'Off: the whole block at once']] },
     { k: 'writeAnimationMs', label: 'Time per line, in ms (smaller = faster; a whole block takes at most about 15 s)', type: 'number', step: 50, when: ['writeAnimation', 'write|fade|lines'] },
     { heading: 'Your pen' },
+    { k: 'eraserBlocks', label: 'The eraser also erases Claude\'s blocks and pasted pictures (off: only your own ink; remove blocks with Select → Delete)', type: 'checkbox' },
     { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
     { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
     { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },

@@ -148,6 +148,49 @@ $('#panelBtn').addEventListener('click', () => {
 });
 $('#settingsBtn').addEventListener('click', () => settingsUI.open());
 $('#stopBtn').addEventListener('click', () => agent.stop());
+// The bar over a selected block (Select tool): Delete · Copy · Duplicate · Ask
+on('block-bar', (r) => {
+  const bar = $('#blockBar');
+  if (!r) { bar.hidden = true; return; }
+  const wrap = $('#boardWrap').getBoundingClientRect(), cv = board.c.getBoundingClientRect();
+  bar.hidden = false;
+  bar.querySelector('[data-bb="copy"]').textContent = r.image ? 'Copy picture' : 'Copy';
+  const bw = bar.offsetWidth, bh = bar.offsetHeight;
+  const ox = cv.left - wrap.left, oy = cv.top - wrap.top;
+  let x = ox + r.x + r.w / 2 - bw / 2, y = oy + r.y - bh - 14;
+  if (y < 6) y = oy + r.y + r.h + 14; // no room above: below the block
+  x = Math.max(6, Math.min(wrap.width - bw - 6, x));
+  y = Math.max(6, Math.min(wrap.height - bh - 6, y));
+  bar.style.left = `${x}px`;
+  bar.style.top = `${y}px`;
+});
+$('#blockBar').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('#blockBar').addEventListener('click', async (e) => {
+  const act = e.target.closest('[data-bb]')?.dataset.bb;
+  const b = board.activeBlock;
+  if (!act || !b) return;
+  if (act === 'delete') board.deleteActiveBlock();
+  else if (act === 'dup') { await board.duplicateActiveBlock(); toolToast('Duplicated'); }
+  else if (act === 'ask') {
+    board.selectActiveBlock();
+    if (settings.panelPosition === 'hidden') setSettings({ panelPosition: 'right' });
+    $('#input').focus();
+  } else if (act === 'copy') {
+    try {
+      if (b.kind === 'image') {
+        const png = await new Promise((res, rej) => {
+          const img = new Image();
+          img.onload = () => { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); c.toBlob((bl) => (bl ? res(bl) : rej(new Error('no image'))), 'image/png'); };
+          img.onerror = rej;
+          img.src = b.src;
+        });
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      } else await navigator.clipboard.writeText((b.lines || []).join('\n'));
+      toolToast('Copied');
+    } catch { toolToast("Couldn't copy (the browser refused)"); }
+  }
+  board.renderLive();
+});
 $('#askSel').addEventListener('click', () => {
   if (settings.panelPosition === 'hidden') setSettings({ panelPosition: 'right' });
   $('#input').focus();

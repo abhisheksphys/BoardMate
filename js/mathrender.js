@@ -95,7 +95,9 @@ export function texToImage(tex, { color = '#000', display = true, fontPx = 22, s
     }
     let node;
     try {
-      node = window.MathJax.tex2svg(tex, { display });
+      // the promise version loads extra LaTeX packages on demand (\boldsymbol, \cancel, \bra/\ket, \ce …);
+      // the plain one can't wait for them and drew such commands as red text
+      node = window.MathJax.tex2svgPromise ? await window.MathJax.tex2svgPromise(tex, { display }) : window.MathJax.tex2svg(tex, { display });
     } catch {
       return null;
     }
@@ -106,6 +108,9 @@ export function texToImage(tex, { color = '#000', display = true, fontPx = 22, s
     // hid the message. Report the error instead, so the line can be shown as text and Claude can fix it.
     const err = svg.querySelector('[data-mml-node="merror"]');
     if (err) return { error: err.getAttribute('data-mjx-error') || err.getAttribute('title') || err.textContent || 'LaTeX error' };
+    // an unknown command is drawn as its name in red (not as an error box): report it too
+    const unknown = svg.querySelector('[data-mml-node="mtext"][fill="red"], [data-mml-node="mtext"][color="red"]');
+    if (unknown) return { error: `Unknown command ${unknown.textContent || ''}`.trim() };
     const exPx = fontPx * 0.44;
     const w = Math.max(1, parseFloat(svg.getAttribute('width')) * exPx);
     const h = Math.max(1, parseFloat(svg.getAttribute('height')) * exPx);

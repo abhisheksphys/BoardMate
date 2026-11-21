@@ -879,6 +879,45 @@ export class Board {
     return (a && this.page.blocks.includes(a) && this.hitHandle(a, w, true)) || !!this.hitBlock(w, true);
   }
 
+  // The bar over a selected block (Select tool): its screen rect, or null when it should be hidden.
+  updateBlockBar() {
+    const b = this.tool === 'select' && this.activeBlock && this.page.blocks.includes(this.activeBlock) && !this.drawing?.move && !this.drawing?.resize ? this.activeBlock : null;
+    let r = null;
+    if (b) { const v = this.page.view; r = { x: b.x * v.z + v.ox, y: b.y * v.z + v.oy, w: (b.w || 100) * v.z, h: (b.h || 30) * v.z, image: b.kind === 'image' }; }
+    const key = r ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}` : '';
+    if (key === this.barKey) return;
+    this.barKey = key;
+    emit('block-bar', r);
+  }
+
+  // Duplicate: a copy just below (new id), selected, one undo step.
+  async duplicateActiveBlock() {
+    const b = this.activeBlock;
+    if (!b || !this.page.blocks.includes(b)) return null;
+    const c = structuredClone({ ...b });
+    c.id = uid();
+    c.y = b.y + (b.h || 30) + this.blockGap(b.fontPx || 22);
+    this.page.blocks.push(c);
+    await this.layoutBlock(c);
+    this.pushUndo({ add: { blocks: [c] } });
+    this.activeBlock = c;
+    this.markDirty({ x: c.x, y: c.y, w: c.w || 1, h: c.h || 1 }, { ai: c.author !== 'user' });
+    if (this.layout) await this.keepOnPage(c);
+    this.render();
+    this.saveSoon();
+    return c;
+  }
+
+  // The selected block as the selection (for "Ask")
+  selectActiveBlock() {
+    const b = this.activeBlock;
+    if (!b) return;
+    const pad = 6;
+    this.selection = { x: b.x - pad, y: b.y - pad, w: (b.w || 100) + 2 * pad, h: (b.h || 30) + 2 * pad };
+    emit('selection', this.selection);
+    this.renderLive();
+  }
+
   deleteActiveBlock() {
     const b = this.activeBlock;
     if (!b || !this.page.blocks.includes(b)) return false;
@@ -1452,8 +1491,9 @@ export class Board {
     }
     if (changed) { P.strokes = keep; this.renderRegion(region); }
 
-    // Claude's typeset blocks and margin marks go whole when touched.
-    for (const b of [...P.blocks]) {
+    // Claude's typeset blocks (and pasted pictures) go whole when touched, only if the setting says so; by default
+    // the eraser leaves them alone, so you can rub out your own writing on top of a block. Marks go when touched.
+    if (settings.eraserBlocks) for (const b of [...P.blocks]) {
       const nx = Math.max(b.x, Math.min(c.x, b.x + (b.w || 1))), ny = Math.max(b.y, Math.min(c.y, b.y + (b.h || 1)));
       if (Math.hypot(nx - c.x, ny - c.y) < r) {
         P.blocks = P.blocks.filter((x) => x !== b);
@@ -2069,6 +2109,7 @@ export class Board {
     ctx.setTransform(scale * view.z, 0, 0, scale * view.z, scale * view.ox, scale * view.oy);
     if (this.drawing?.stroke) drawStroke(ctx, this.drawing.stroke, this.drawing.predicted);
     const ab = this.tool === 'select' && this.activeBlock && this.page.blocks.includes(this.activeBlock) ? this.activeBlock : this.drawing?.move;
+    this.updateBlockBar();
     if (ab) {
       const pad = 4 / view.z;
       ctx.save();
