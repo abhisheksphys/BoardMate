@@ -815,8 +815,10 @@ export class Board {
         this.drawing = { ...base, resize: a, handle, from: { x: a.x, y: a.y, w: a.w, h: a.h, fontPx: a.fontPx, strokePx: a.strokePx, maxW: a.maxW, fixedW: a.fixedW }, start: w };
       } else {
         const b = this.hitBlock(w, e.pointerType === 'touch');
+        const wasActive = !!b && this.activeBlock === b;
+        if (!b || !wasActive) this.barOpen = false; // a newly selected block starts without its bar
         this.activeBlock = b;
-        if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w };
+        if (b) this.drawing = { ...base, move: b, from: { x: b.x, y: b.y }, start: w, wasActive };
         else this.drawing = { ...base, sel: { x0: w.x, y0: w.y } };
       }
     } else if (this.tool === 'lasso') {
@@ -881,7 +883,7 @@ export class Board {
 
   // The bar over a selected block (Select tool): its screen rect, or null when it should be hidden.
   updateBlockBar() {
-    const b = this.tool === 'select' && this.activeBlock && this.page.blocks.includes(this.activeBlock) && !this.drawing?.move && !this.drawing?.resize ? this.activeBlock : null;
+    const b = this.barOpen && this.tool === 'select' && this.activeBlock && this.page.blocks.includes(this.activeBlock) && !this.drawing?.move && !this.drawing?.resize ? this.activeBlock : null;
     let r = null;
     if (b) { const v = this.page.view; r = { x: b.x * v.z + v.ox, y: b.y * v.z + v.oy, w: (b.w || 100) * v.z, h: (b.h || 30) * v.z, image: b.kind === 'image' }; }
     const key = r ? `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}` : '';
@@ -1073,6 +1075,11 @@ export class Board {
         if (d.dirty) this.markDirty(d.dirty);
       }
     } else if (d.move) {
+      // a tap (no real drag) on a block that was already selected shows or hides its bar
+      if (Math.hypot(d.move.x - d.from.x, d.move.y - d.from.y) * this.page.view.z < 6) {
+        Object.assign(d.move, d.from);
+        if (d.wasActive) this.barOpen = !this.barOpen;
+      }
       if (d.move.x !== d.from.x || d.move.y !== d.from.y) {
         this.pushUndo({ move: { id: d.move.id, from: d.from, to: { x: d.move.x, y: d.move.y } } });
         this.markDirty({ x: d.move.x, y: d.move.y, w: d.move.w || 1, h: d.move.h || 1 }, { ai: d.move.author !== 'user' });
