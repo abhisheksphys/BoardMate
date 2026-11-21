@@ -131,7 +131,7 @@ export const TOOL_SCHEMAS = [
       `Change app settings immediately. Allowed keys: ${AI_EDITABLE.join(', ')}. ` +
       'attention: live|quiet|demand. answerDepth: auto|brief|detailed ("always answer in more detail" → detailed). panelPosition: right|left|bottom|float|hidden. customInstructions: array of standing instructions for you. ' +
       'Only use when the user asked for the change or agreed to your suggestion.',
-    input_schema: { type: 'object', properties: { patch: { type: 'object' }, scope: { type: 'string', enum: ['global', 'session'], description: 'session: only for this session, for Claude\'s writing keys (aiSizeMode, aiSizeScale, aiSizeManual, aiSizeFixed, aiWeightMode, aiWeightManual, aiColorMode, aiColor, writeStyle = compact|comfortable|textbook), e.g. "in this session write in dark green, 12 pt"; patch null-like {"reset": true} returns the session to the defaults. Default: global.' }, reason: { type: 'string' } }, required: ['patch'] },
+    input_schema: { type: 'object', properties: { patch: { type: 'object' }, scope: { type: 'string', enum: ['global', 'session'], description: 'session: only for this session, for Claude\'s writing keys (aiSizeMode, aiSizeScale, aiSizeManual, aiSizeFixed, aiWeightMode, aiWeightManual, aiColorMode, aiColor, writeStyle = compact|comfortable|textbook, writeMargin = page margin 16|40|64|96), e.g. "in this session write in dark green, 12 pt"; patch null-like {"reset": true} returns the session to the defaults. Default: global.' }, reason: { type: 'string' } }, required: ['patch'] },
   },
   {
     name: 'save_action',

@@ -637,7 +637,7 @@ export class Board {
   // Keeps something Claude wrote (or a picture) on the page; writing that no longer fits continues on the next page.
   async keepOnPage(b) {
     if (!this.layout || !b) return null;
-    const s = this.pageSize(), m = PAGE_INSET;
+    const s = this.pageSize(), m = this.inset();
     if (b.kind !== 'image' && !b.maxW) { this.fitToArea(b); this.layouts.delete(b.id); await this.layoutBlock(b); }
     if ((b.w || 0) > s.w - 2 * m) await this.scaleBlock(b.id, (s.w - 2 * m) / b.w);
     b.x = clamp(b.x, m, Math.max(m, s.w - m - (b.w || 0)));
@@ -1583,6 +1583,9 @@ export class Board {
     return lay;
   }
 
+  // the page margin Claude's writing keeps (Settings → Board → Claude's writing, or the session's own)
+  inset() { const m = Number(this.ws().writeMargin); return Number.isFinite(m) && m >= 0 ? Math.min(160, m) : PAGE_INSET; }
+
   // Claude's writing in this session: the global settings, or the session's own (Page setup)
   ws() { return writingSettings(this.sessionWriting); }
 
@@ -1594,7 +1597,13 @@ export class Board {
 
   // the board writing style changed: lay Claude's blocks out again (every page; the open one now)
   restyle() {
-    for (const p of this.pages) for (const b of p.blocks) if (b.kind !== 'image') this.layouts.delete(b.id);
+    const m = this.inset();
+    for (const p of this.pages) for (const b of p.blocks) {
+      if (b.kind === 'image') continue;
+      this.layouts.delete(b.id);
+      // notebook: the page margin may have changed, so the text width follows it (unless you set the width by hand)
+      if (this.layout && !b.fixedW && b.author !== 'user') this.fitToArea(b, { left: m, right: this.pageSize(p).w - m });
+    }
     this.prepareBlocks();
     this.prepareNeighbours?.();
     this.render();
@@ -1708,14 +1717,14 @@ export class Board {
   // Where Claude may write: a notebook page minus its margins; on a freeform page, the part of the board you can
   // see now (e.g. half the screen when the panel takes the other half), minus a margin.
   writeArea() {
-    if (this.layout) { const s = this.pageSize(); return { left: PAGE_INSET, right: s.w - PAGE_INSET }; }
-    const vis = this.visibleWorld(), m = 28 / this.page.view.z;
+    if (this.layout) { const s = this.pageSize(), m = this.inset(); return { left: m, right: s.w - m }; }
+    const vis = this.visibleWorld(), m = this.inset() / this.page.view.z; // freeform: a margin on screen
     return { left: vis.x + m, right: vis.x + vis.w - m };
   }
 
   // Fits a block's position and wrap width into the write area (keeps at least ~half the area's width to write in).
-  fitToArea(b) {
-    const { left, right } = this.writeArea();
+  fitToArea(b, area = this.writeArea()) {
+    const { left, right } = area;
     const full = Math.max(80, right - left);
     b.x = Math.max(left, b.x);
     let maxW = right - b.x;

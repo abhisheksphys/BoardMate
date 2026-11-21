@@ -62,6 +62,7 @@ const SECTIONS = [
     { k: 'mathScale', label: 'Display equation size, relative to the text (1 = same)', type: 'number', step: 0.05 },
     { k: 'headingScale', label: 'Heading size', type: 'select', options: [['small', 'Small'], ['normal', 'Normal'], ['large', 'Large']] },
     { k: 'headingColor', label: 'Heading colour', type: 'select', options: [['darker', 'A darker shade of Claude\'s colour'], ['same', 'The same colour']] },
+    { k: 'writeMargin', label: 'Page margin around Claude\'s writing', type: 'select', options: [['16', 'Narrow'], ['40', 'Normal'], ['64', 'Wide'], ['96', 'Extra wide']], num: true },
     { k: 'aiSideBar', label: 'Thin line to the left of Claude\'s blocks', type: 'checkbox' },
     { k: 'writeAnimation', label: 'How Claude\'s writing appears', type: 'select', options: [['write', 'Written: each line drawn left to right, like a pen'], ['fade', 'Fade in: line by line'], ['lines', 'Line by line: each line appears at once'], ['off', 'Off: the whole block at once']] },
     { k: 'writeAnimationMs', label: 'Time per line, in ms (smaller = faster; a whole block takes at most about 15 s)', type: 'number', step: 50, when: ['writeAnimation', 'write|fade|lines'] },
@@ -119,7 +120,7 @@ function fieldInner(f) {
   const v = getPath(settings, f.k);
   const hint = f.hint ? `<small>${escapeHtml(f.hint)}</small>` : f.avgHint ? '<small class="avg-hint"></small>' : f.ptHint ? '<small class="pt-hint"></small>' : '';
   if (f.type === 'checkbox') return `<label class="row check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> <span>${escapeHtml(f.label)}</span></label>`;
-  if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${escapeHtml(val)}" ${val === v ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
+  if (f.type === 'select') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}">${f.options.map(([val, lab]) => `<option value="${escapeHtml(val)}" ${String(val) === String(v) ? 'selected' : ''}>${escapeHtml(lab)}</option>`).join('')}</select></label>`;
   if (f.type === 'model') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}" data-model>${modelOptions(cachedModels(), v)}</select>${hint}</label>`;
   if (f.type === 'voice') return `<label class="row"><span>${escapeHtml(f.label)}</span><select id="${id}"></select></label>`;
   if (f.type === 'lines') return `<label class="row"><span>${escapeHtml(f.label)}</span><textarea id="${id}" rows="4">${escapeHtml((v || []).join('\n'))}</textarea></label>`;
@@ -142,7 +143,7 @@ function readField(f) {
   if (!el) return;
   let v;
   if (f.type === 'checkbox') v = el.checked;
-  else if (f.type === 'number') v = parseFloat(el.value) || 0;
+  else if (f.type === 'number' || f.num) v = parseFloat(el.value) || 0;
   else if (f.type === 'lines') v = el.value.split('\n').map((s) => s.trim()).filter(Boolean);
   else v = el.value.trim();
   setPath(settings, f.k, v);

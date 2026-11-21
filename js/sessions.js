@@ -330,6 +330,7 @@ export class Sessions {
     $('#psColorMode').value = w.aiColorMode;
     $('#psColor').value = /^#[0-9a-f]{6}$/i.test(w.aiColor) ? w.aiColor : '#1a5fd0';
     $('#psColor').hidden = w.aiColorMode !== 'manual';
+    $('#psMargin').value = String(w.writeMargin ?? settings.writeMargin);
   }
 
   async writingInput(id) {
@@ -342,12 +343,13 @@ export class Sessions {
     else if (id === 'psWeightVal') { const n = num($('#psWeightVal')); if (n >= 0) await this.setWriting({ aiWeightManual: n }); }
     else if (id === 'psColorMode') await this.setWriting({ aiColorMode: $('#psColorMode').value });
     else if (id === 'psColor') await this.setWriting({ aiColor: $('#psColor').value });
+    else if (id === 'psMargin') await this.setWriting({ writeMargin: Number($('#psMargin').value) });
     this.fillWriting();
   }
 
   async pageSetupChoice(name, v) {
     if (name === 'wmode') { await this.setWriting(v === 'custom' ? (this.meta.writing ? {} : {}) : null); return this.fillWriting(); }
-    if (name === 'wstyle') { await this.setWriting({ writeStyle: v }); return this.fillWriting(); }
+    if (name === 'wstyle') { await this.setWriting({ writeStyle: v, writeMargin: WRITE_PRESETS[v]?.writeMargin }); return this.fillWriting(); }
     const d = $('#pageSetupDlg');
     const scope = d.querySelector('.seg[data-name="scope"] .on')?.dataset.v || 'page';
     const paper = d.querySelector('.seg[data-name="paper"] .on')?.dataset.v;

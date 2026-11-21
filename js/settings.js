@@ -20,6 +20,7 @@ export const DEFAULTS = {
   headingScale: 'normal', // small | normal | large
   headingColor: 'darker', // same | darker
   aiSideBar: true, // the thin line to the left of Claude's blocks
+  writeMargin: 40, // page margin Claude's writing keeps (notebook: from the page edge; freeform: from the screen edge)
   awareness: 'normal', // normal | deep (more looks at other parts of the page, step-back looks in pauses)
   markTap: 'board', // tapping a ✗ / ! mark: board = Claude writes what is wrong and the fix next to the line | panel = the note in the panel
   answerDepth: 'auto', // auto (as much as the question needs) | brief | detailed
@@ -109,7 +110,7 @@ export const DEFAULTS = {
 
 // Keys Claude may change itself. Secrets, models and self-update config stay user-only.
 export const AI_EDITABLE = [
-  'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'writeStyle', 'textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'markTap', 'quietLowEffort', 'liveSpeak',
+  'routing', 'answerDepth', 'attention', 'watchIdleSec', 'quietIdleSec', 'watchMaxWaitSec', 'escalate', 'boardRequests', 'awareness', 'writeStyle', 'textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'writeMargin', 'markTap', 'quietLowEffort', 'liveSpeak',
   'voiceSend', 'voiceSendDelaySec', 'wakeWord', 'headphones', 'voiceOut', 'voiceName', 'speechRate', 'narration',
   'allowBoardWrite', 'writeAnimation', 'writeAnimationMs', 'aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'penColor', 'penWidth', 'inkSmoothing', 'inkPrediction', 'eraserSize', 'eraserMode', 'paper', 'paperSpacing', 'fingerDraws', 'twoFingerSwap', 'doubleTapAction', 'showMarks',
   'panelPosition', 'panelWidth', 'panelHeight', 'floatWidth', 'floatHeight', 'customInstructions',
@@ -145,13 +146,13 @@ delete settings.voiceFreshRuns; delete settings.voiceWatchdogSec;
 
 // Board-writing presets: one choice sets every style setting (each can still be changed on its own).
 export const WRITE_PRESETS = {
-  compact: { textFont: 'serif', lineSpacing: 'compact', paraSpacing: 'small', columnChars: 0, displayAlign: 'left', stepIndent: 'none', mathScale: 1, headingScale: 'small', headingColor: 'same', aiSideBar: true },
-  comfortable: { textFont: 'serif', lineSpacing: 'normal', paraSpacing: 'normal', columnChars: 75, displayAlign: 'center', stepIndent: 'small', mathScale: 1, headingScale: 'normal', headingColor: 'darker', aiSideBar: true },
-  textbook: { textFont: 'serif', lineSpacing: 'relaxed', paraSpacing: 'large', columnChars: 65, displayAlign: 'center', stepIndent: 'small', mathScale: 1.08, headingScale: 'large', headingColor: 'darker', aiSideBar: false },
+  compact: { textFont: 'serif', lineSpacing: 'compact', paraSpacing: 'small', columnChars: 0, displayAlign: 'left', stepIndent: 'none', mathScale: 1, headingScale: 'small', headingColor: 'same', aiSideBar: true, writeMargin: 16 },
+  comfortable: { textFont: 'serif', lineSpacing: 'normal', paraSpacing: 'normal', columnChars: 75, displayAlign: 'center', stepIndent: 'small', mathScale: 1, headingScale: 'normal', headingColor: 'darker', aiSideBar: true, writeMargin: 40 },
+  textbook: { textFont: 'serif', lineSpacing: 'relaxed', paraSpacing: 'large', columnChars: 65, displayAlign: 'center', stepIndent: 'small', mathScale: 1.08, headingScale: 'large', headingColor: 'darker', aiSideBar: false, writeMargin: 64 },
 };
 
 // What a session can set for itself (Page setup → Claude's writing in this session). The style is a preset name.
-export const WRITING_KEYS = ['aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'writeStyle'];
+export const WRITING_KEYS = ['aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'writeStyle', 'writeMargin'];
 
 // The settings Claude's writing follows in a session: the global ones, then the session's preset, then its own values.
 export function writingSettings(override) {
