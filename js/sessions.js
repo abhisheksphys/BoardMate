@@ -4,7 +4,7 @@
 // Also: subjects, pinning, search (incl. "ask Claude to find it"), branching, trash, backup/restore,
 // and per-session PDF materials.
 import { idb } from './storage.js';
-import { settings, setSettings } from './settings.js';
+import { settings, setSettings, WRITING_KEYS, WRITE_PRESETS } from './settings.js';
 import { on, emit, uid, escapeHtml } from './bus.js';
 import { claude, textOf, parseJSON } from './claude.js';
 import { fmt } from './costs.js';
@@ -228,6 +228,7 @@ export class Sessions {
     this.agent.exchanges = data.exchanges || [];
     this.agent.lastAskAt = Date.now();
     this.board.setLayout(meta.layout || null);
+    this.board.setSessionWriting(meta.writing || null, { relayout: false }); // Claude's writing: this session's own, if set
     this.board.sessionPaper = meta.layout ? null : meta.paper || null; // freeform: this session's paper for new pages
     this.board.load(data.pages || []);
     this.panel.clear();
@@ -301,15 +302,52 @@ export class Sessions {
     if (lay) { set('size', lay.size); set('orient', lay.orient); set('scroll', lay.scroll); }
     set('paper', this.board.paperOf());
     set('scope', 'page');
+    this.fillWriting();
     $('#psHint').textContent = lay?.pdf
       ? 'PDF notebook: pages from the PDF keep their own size and have no paper; page size, orientation and paper apply to the blank pages you add.'
       : lay
       ? 'Changes show right away. A smaller page can hide writing near its edges (it is kept, just outside the page).'
-      : 'Changes show right away. Freeform sessions have one setting: the paper.';
+      : 'Changes show right away. Claude’s writing: your defaults from Settings → Board, or this session’s own size, stroke, colour and style.';
     d.showModal();
   }
 
+  // Page setup → Claude's writing in this session
+  fillWriting() {
+    const d = $('#pageSetupDlg'), w = this.meta?.writing;
+    const set = (name, v) => d.querySelectorAll(`.seg[data-name="${name}"] button`).forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    set('wmode', w ? 'custom' : 'default');
+    $('#psWriting').hidden = !w;
+    if (!w) return;
+    set('wstyle', w.writeStyle);
+    $('#psSizeMode').value = w.aiSizeMode;
+    const sizeKey = { mimic: 'aiSizeScale', manual: 'aiSizeManual', fixed: 'aiSizeFixed' }[w.aiSizeMode] || 'aiSizeScale';
+    $('#psSizeVal').value = w[sizeKey];
+    $('#psSizeVal').step = w.aiSizeMode === 'fixed' ? '1' : '0.05';
+    $('#psSizeVal').title = w.aiSizeMode === 'fixed' ? 'points (12 = printed text)' : 'in units of your handwriting (1 = same)';
+    $('#psWeightMode').value = w.aiWeightMode;
+    $('#psWeightVal').value = w.aiWeightManual;
+    $('#psWeightVal').hidden = w.aiWeightMode !== 'manual';
+    $('#psColorMode').value = w.aiColorMode;
+    $('#psColor').value = /^#[0-9a-f]{6}$/i.test(w.aiColor) ? w.aiColor : '#1a5fd0';
+    $('#psColor').hidden = w.aiColorMode !== 'manual';
+  }
+
+  async writingInput(id) {
+    const w = this.meta?.writing;
+    if (!w) return;
+    const num = (el) => { const n = parseFloat(el.value); return Number.isFinite(n) ? n : undefined; };
+    if (id === 'psSizeMode') await this.setWriting({ aiSizeMode: $('#psSizeMode').value });
+    else if (id === 'psSizeVal') { const k = { mimic: 'aiSizeScale', manual: 'aiSizeManual', fixed: 'aiSizeFixed' }[w.aiSizeMode]; const n = num($('#psSizeVal')); if (k && n > 0) await this.setWriting({ [k]: n }); }
+    else if (id === 'psWeightMode') await this.setWriting({ aiWeightMode: $('#psWeightMode').value });
+    else if (id === 'psWeightVal') { const n = num($('#psWeightVal')); if (n >= 0) await this.setWriting({ aiWeightManual: n }); }
+    else if (id === 'psColorMode') await this.setWriting({ aiColorMode: $('#psColorMode').value });
+    else if (id === 'psColor') await this.setWriting({ aiColor: $('#psColor').value });
+    this.fillWriting();
+  }
+
   async pageSetupChoice(name, v) {
+    if (name === 'wmode') { await this.setWriting(v === 'custom' ? (this.meta.writing ? {} : {}) : null); return this.fillWriting(); }
+    if (name === 'wstyle') { await this.setWriting({ writeStyle: v }); return this.fillWriting(); }
     const d = $('#pageSetupDlg');
     const scope = d.querySelector('.seg[data-name="scope"] .on')?.dataset.v || 'page';
     const paper = d.querySelector('.seg[data-name="paper"] .on')?.dataset.v;
@@ -321,6 +359,19 @@ export class Sessions {
       if (this.meta.layout) await this.setLayout({ paper });
       else { this.meta.paper = paper; this.board.sessionPaper = paper; await idb.set('sessions', this.meta.id, this.meta); }
     }
+  }
+
+  // Claude's writing in this session (Page setup): null = the defaults from Settings; else its own size, stroke,
+  // colour and style preset. Takes effect at once (Claude's blocks are laid out again).
+  async setWriting(patch) {
+    if (!this.meta) return;
+    if (patch === null) delete this.meta.writing;
+    else {
+      const base = this.meta.writing || Object.fromEntries(WRITING_KEYS.map((k) => [k, k === 'writeStyle' ? (WRITE_PRESETS[settings.writeStyle] ? settings.writeStyle : 'comfortable') : settings[k]]));
+      this.meta.writing = { ...base, ...Object.fromEntries(Object.entries(patch).filter(([k]) => WRITING_KEYS.includes(k))) };
+    }
+    this.board.setSessionWriting(this.meta.writing || null);
+    await idb.set('sessions', this.meta.id, this.meta);
   }
 
   // Notebook page setup, changeable any time (Page setup); the session type itself is not.
@@ -343,7 +394,7 @@ export class Sessions {
       title: `${meta.title} (branch)`, titleAuto: false, subject: meta.subject, parent: id, notesFrom: { snap: copy.snap }, layout: meta.layout || null, folder: this.folderOk(meta.folder),
     });
     const m = await idb.get('sessions', newId);
-    Object.assign(m, { summary: meta.summary, recap: meta.recap, thumb: meta.thumb, searchText: meta.searchText });
+    Object.assign(m, { summary: meta.summary, recap: meta.recap, thumb: meta.thumb, searchText: meta.searchText, writing: meta.writing ? structuredClone(meta.writing) : undefined });
     await idb.set('sessions', newId, m);
     await copySessionBooks(id, newId);
     await this.open(newId);
@@ -612,6 +663,7 @@ export class Sessions {
       this.pageSetupChoice(b.parentElement.dataset.name, b.dataset.v);
     });
     for (const id of ['#psClose', '#psDone']) $(id).addEventListener('click', () => ps.close());
+    ps.addEventListener('change', (e) => { if (e.target.closest('#psWriting')) this.writingInput(e.target.id); });
     $('#drawerClose').addEventListener('click', () => this.closeDrawer());
     $('#newSession').addEventListener('click', () => this.chooseNewSession());
     // New session sheet: pick a type card; Notebook shows its page setup (segmented choices); Create.

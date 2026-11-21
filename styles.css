@@ -546,3 +546,16 @@ dialog.pages-sheet[open] { display: flex; }
 #updBar span { flex: 1; }
 #updBar button { border: 1px solid #c4d6f5; background: #fff; padding: 4px 10px; color: #12407f; }
 #updBar #updGo { background: #1a5fd0; color: #fff; border-color: #1a5fd0; }
+
+/* sub-headings inside a settings section */
+.settings h4.set-sub { margin: 18px 0 4px; font-size: 13px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+.settings h4.set-sub:first-of-type { margin-top: 6px; }
+.settings h4.set-sub small { display: block; margin-top: 3px; font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+/* page setup: Claude's writing in this session */
+.ps-writing { display: grid; gap: 10px; }
+.ps-writing[hidden] { display: none; }
+.ps-writing .row2 { display: grid; grid-template-columns: 104px 1fr 84px; gap: 8px; align-items: center; font-size: 14px; }
+.ps-writing select, .ps-writing input[type=number] { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--surface); min-width: 0; }
+.ps-writing input[type=color] { width: 84px; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--surface); }
+.ps-writing input[hidden] { visibility: hidden; display: block; }
+.ps-sep { border-top: 1px solid var(--line); margin: 4px 0; }

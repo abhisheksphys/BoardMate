@@ -1,7 +1,7 @@
 // The ink board: Pencil/pressure strokes, eraser, select/move, pan/zoom, pages, undo,
 // typeset AI blocks, margin marks, and image snapshots for Claude.
 import { emit, uid, union, sleep } from './bus.js';
-import { settings } from './settings.js';
+import { settings, writingSettings } from './settings.js';
 import { texToImage, lineToTex } from './mathrender.js';
 import { cachedBg, renderBg, bgNeedsBetter, thumbBg } from './pdfbg.js';
 
@@ -1288,7 +1288,7 @@ export class Board {
   // writing where it goes) or "manual" (a set value). Size is in units of your own writing, except
   // "fixed": one absolute size (points; 1 pt = 96/72 board units, so 12 pt prints as 12 pt) everywhere.
   aiStyle(at, selection = null, extraScale = 1) {
-    const s = settings;
+    const s = this.ws();
     const got = this.writingPool(at, selection);
     const pool = got?.pool || [];
     const avg = this.averageWritingSize() || 22;
@@ -1478,7 +1478,7 @@ export class Board {
     }
     const fontPx = b.fontPx || 22;
     // the board writing style (Settings → Board writing style; a preset sets these)
-    const st = settings;
+    const st = this.ws();
     const serif = st.textFont !== 'sans';
     const gap = fontPx * ({ compact: 0.25, normal: 0.45, relaxed: 0.75 }[st.lineSpacing] ?? 0.45);
     const para = fontPx * ({ small: 0.3, normal: 0.6, large: 1.0 }[st.paraSpacing] ?? 0.6);
@@ -1581,6 +1581,15 @@ export class Board {
     this.layouts.set(b.id, lay);
     this.render();
     return lay;
+  }
+
+  // Claude's writing in this session: the global settings, or the session's own (Page setup)
+  ws() { return writingSettings(this.sessionWriting); }
+
+  setSessionWriting(w, { relayout = true } = {}) {
+    this.sessionWriting = w || null;
+    this.layouts.clear(); // every block is laid out again in the session's style
+    if (relayout && this.page) this.restyle();
   }
 
   // the board writing style changed: lay Claude's blocks out again (every page; the open one now)
@@ -2169,7 +2178,7 @@ export class Board {
   drawBlock(ctx, b) {
     if (ctx === this.ctx && this.unready?.has(b.id)) return;
     const lay = this.layouts.get(b.id);
-    if (b.kind !== 'image' && settings.aiSideBar !== false) {
+    if (b.kind !== 'image' && this.ws().aiSideBar !== false) {
       ctx.fillStyle = b.color + '55';
       // while it is being written, the side bar grows with the lines
       const an = ctx === this.ctx && this.anims?.get(b.id), its = an && this.layouts.get(b.id)?.items;

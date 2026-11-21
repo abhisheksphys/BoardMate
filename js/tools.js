@@ -1,5 +1,5 @@
 // Tools Claude can call while answering. Pixel coordinates always refer to the latest full-page image.
-import { settings, saveSettings, aiUpdateSettings, AI_EDITABLE } from './settings.js';
+import { settings, saveSettings, aiUpdateSettings, AI_EDITABLE, WRITING_KEYS } from './settings.js';
 import { runSympy } from './cas.js';
 import { searchLibrary, renderPage, listBooks } from './library.js';
 import { imageBlock } from './claude.js';
@@ -131,7 +131,7 @@ export const TOOL_SCHEMAS = [
       `Change app settings immediately. Allowed keys: ${AI_EDITABLE.join(', ')}. ` +
       'attention: live|quiet|demand. answerDepth: auto|brief|detailed ("always answer in more detail" → detailed). panelPosition: right|left|bottom|float|hidden. customInstructions: array of standing instructions for you. ' +
       'Only use when the user asked for the change or agreed to your suggestion.',
-    input_schema: { type: 'object', properties: { patch: { type: 'object' }, reason: { type: 'string' } }, required: ['patch'] },
+    input_schema: { type: 'object', properties: { patch: { type: 'object' }, scope: { type: 'string', enum: ['global', 'session'], description: 'session: only for this session, for Claude\'s writing keys (aiSizeMode, aiSizeScale, aiSizeManual, aiSizeFixed, aiWeightMode, aiWeightManual, aiColorMode, aiColor, writeStyle = compact|comfortable|textbook), e.g. "in this session write in dark green, 12 pt"; patch null-like {"reset": true} returns the session to the defaults. Default: global.' }, reason: { type: 'string' } }, required: ['patch'] },
   },
   {
     name: 'save_action',
@@ -371,6 +371,16 @@ export async function runTool(use, ctx) {
       }
 
       case 'update_settings': {
+        if (inp.scope === 'session') {
+          const S = ctx.sessions;
+          if (!S?.meta) return fail(use.id, 'No open session.');
+          if (inp.patch?.reset) { await S.setWriting(null); return ok(use.id, "This session now uses the default writing settings again."); }
+          const keys = Object.keys(inp.patch || {}).filter((k) => WRITING_KEYS.includes(k));
+          if (!keys.length) return fail(use.id, `Only these can be set for one session: ${WRITING_KEYS.join(', ')}.`);
+          await S.setWriting(Object.fromEntries(keys.map((k) => [k, inp.patch[k]])));
+          panel.add('info', `This session's writing: ${keys.map((k) => `**${k}** → \`${JSON.stringify(inp.patch[k])}\``).join(', ')}${inp.reason ? ` — ${inp.reason}` : ''}`);
+          return ok(use.id, `Set for this session only: ${keys.join(', ')}.`);
+        }
         const r = aiUpdateSettings(inp.patch);
         const keys = Object.keys(r.applied);
         if (keys.length) panel.add('info', `Settings changed: ${keys.map((k) => `**${k}** → \`${JSON.stringify(r.applied[k])}\``).join(', ')}${inp.reason ? ` — ${inp.reason}` : ''}`);

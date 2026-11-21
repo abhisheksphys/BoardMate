@@ -11,7 +11,7 @@
   <title>Live Board</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2026.11.21-0454">
+  <link rel="stylesheet" href="styles.css?v=2026.11.21-0532">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -125,6 +125,19 @@
       <div class="opt"><span>Apply paper to</span><div class="seg" data-name="scope">
         <button type="button" data-v="page">This page + new pages</button>
         <button type="button" data-v="all">All pages</button></div></div>
+      <div class="ps-sep"></div>
+      <div class="opt"><span>Claude's writing</span><div class="seg" data-name="wmode">
+        <button type="button" data-v="default">My defaults</button>
+        <button type="button" data-v="custom">This session's own</button></div></div>
+      <div class="ps-writing" id="psWriting" hidden>
+        <div class="row2"><span>Size</span><select id="psSizeMode"><option value="mimic">Like my handwriting there</option><option value="manual">× my average writing</option><option value="fixed">Fixed size, in points</option></select><input type="number" id="psSizeVal" step="0.05" aria-label="Size"></div>
+        <div class="row2"><span>Stroke width</span><select id="psWeightMode"><option value="manual">A set thickness</option><option value="mimic">Like my pen</option></select><input type="number" id="psWeightVal" step="0.2" aria-label="Stroke width"></div>
+        <div class="row2"><span>Colour</span><select id="psColorMode"><option value="manual">A colour I pick</option><option value="mimic">My ink colour there</option></select><input type="color" id="psColor" aria-label="Colour"></div>
+        <div class="opt"><span>Style</span><div class="seg" data-name="wstyle">
+          <button type="button" data-v="compact">Compact</button>
+          <button type="button" data-v="comfortable">Comfortable</button>
+          <button type="button" data-v="textbook">Textbook</button></div></div>
+      </div>
       <p class="hint" id="psHint"></p>
     </div>
     <footer><button type="button" class="primary" id="psDone">Done</button></footer>
@@ -144,37 +157,37 @@
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.21-0454",
-  "./js/app.js": "./js/app.js?v=2026.11.21-0454",
-  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0454",
-  "./js/backup.js": "./js/backup.js?v=2026.11.21-0454",
-  "./js/board.js": "./js/board.js?v=2026.11.21-0454",
-  "./js/bus.js": "./js/bus.js?v=2026.11.21-0454",
-  "./js/cas.js": "./js/cas.js?v=2026.11.21-0454",
-  "./js/changes.js": "./js/changes.js?v=2026.11.21-0454",
-  "./js/claude.js": "./js/claude.js?v=2026.11.21-0454",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0454",
-  "./js/costs.js": "./js/costs.js?v=2026.11.21-0454",
-  "./js/export.js": "./js/export.js?v=2026.11.21-0454",
-  "./js/github.js": "./js/github.js?v=2026.11.21-0454",
-  "./js/images.js": "./js/images.js?v=2026.11.21-0454",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0454",
-  "./js/library.js": "./js/library.js?v=2026.11.21-0454",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0454",
-  "./js/pages.js": "./js/pages.js?v=2026.11.21-0454",
-  "./js/panel.js": "./js/panel.js?v=2026.11.21-0454",
-  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0454",
-  "./js/perception.js": "./js/perception.js?v=2026.11.21-0454",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0454",
-  "./js/settings.js": "./js/settings.js?v=2026.11.21-0454",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0454",
-  "./js/storage.js": "./js/storage.js?v=2026.11.21-0454",
-  "./js/tools.js": "./js/tools.js?v=2026.11.21-0454",
-  "./js/version.js": "./js/version.js?v=2026.11.21-0454",
-  "./js/voice.js": "./js/voice.js?v=2026.11.21-0454"
+  "./js/agent.js": "./js/agent.js?v=2026.11.21-0532",
+  "./js/app.js": "./js/app.js?v=2026.11.21-0532",
+  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0532",
+  "./js/backup.js": "./js/backup.js?v=2026.11.21-0532",
+  "./js/board.js": "./js/board.js?v=2026.11.21-0532",
+  "./js/bus.js": "./js/bus.js?v=2026.11.21-0532",
+  "./js/cas.js": "./js/cas.js?v=2026.11.21-0532",
+  "./js/changes.js": "./js/changes.js?v=2026.11.21-0532",
+  "./js/claude.js": "./js/claude.js?v=2026.11.21-0532",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0532",
+  "./js/costs.js": "./js/costs.js?v=2026.11.21-0532",
+  "./js/export.js": "./js/export.js?v=2026.11.21-0532",
+  "./js/github.js": "./js/github.js?v=2026.11.21-0532",
+  "./js/images.js": "./js/images.js?v=2026.11.21-0532",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0532",
+  "./js/library.js": "./js/library.js?v=2026.11.21-0532",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0532",
+  "./js/pages.js": "./js/pages.js?v=2026.11.21-0532",
+  "./js/panel.js": "./js/panel.js?v=2026.11.21-0532",
+  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0532",
+  "./js/perception.js": "./js/perception.js?v=2026.11.21-0532",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0532",
+  "./js/settings.js": "./js/settings.js?v=2026.11.21-0532",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0532",
+  "./js/storage.js": "./js/storage.js?v=2026.11.21-0532",
+  "./js/tools.js": "./js/tools.js?v=2026.11.21-0532",
+  "./js/version.js": "./js/version.js?v=2026.11.21-0532",
+  "./js/voice.js": "./js/voice.js?v=2026.11.21-0532"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.21-0454"></script>
+  <script type="module" src="js/app.js?v=2026.11.21-0532"></script>
 </head>
 <body class="panel-right">
   <div id="updBar" role="status" hidden><span></span><button type="button" id="updGo">Update now</button><button type="button" aria-label="Later" onclick="this.parentNode.hidden=true">Later</button></div>

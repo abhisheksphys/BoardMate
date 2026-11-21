@@ -150,6 +150,18 @@ export const WRITE_PRESETS = {
   textbook: { textFont: 'serif', lineSpacing: 'relaxed', paraSpacing: 'large', columnChars: 65, displayAlign: 'center', stepIndent: 'small', mathScale: 1.08, headingScale: 'large', headingColor: 'darker', aiSideBar: false },
 };
 
+// What a session can set for itself (Page setup → Claude's writing in this session). The style is a preset name.
+export const WRITING_KEYS = ['aiSizeMode', 'aiSizeScale', 'aiSizeManual', 'aiSizeFixed', 'aiWeightMode', 'aiWeightManual', 'aiColorMode', 'aiColor', 'writeStyle'];
+
+// The settings Claude's writing follows in a session: the global ones, then the session's preset, then its own values.
+export function writingSettings(override) {
+  if (!override) return settings;
+  const preset = WRITE_PRESETS[override.writeStyle] || {};
+  const own = {};
+  for (const k of WRITING_KEYS) if (override[k] !== undefined && override[k] !== null && k !== 'writeStyle') own[k] = override[k];
+  return { ...settings, ...preset, ...own };
+}
+
 export function saveSettings() {
   localStorage.setItem(KEY, JSON.stringify(settings));
   emit('settings', settings);

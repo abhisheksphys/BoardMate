@@ -42,6 +42,7 @@ const SECTIONS = [
     { k: 'speechRate', label: 'Speech rate', type: 'number', step: 0.05 },
   ]],
   ['Board', [
+    { heading: "Claude's writing", hint: 'Defaults for every session. A session can have its own size, stroke, colour and style: Page setup (the icon next to the session title).' },
     { k: 'allowBoardWrite', label: 'Claude may write on the board', type: 'checkbox' },
     { k: 'aiSizeMode', label: "Claude's writing size", type: 'select', options: [['mimic', 'Mimic: like my handwriting where it writes'], ['manual', 'Manual: a set size'], ['fixed', 'Fixed: one absolute size everywhere']] },
     { k: 'aiSizeScale', label: 'Size, in units of my handwriting there (1 = same, 0.9 = a bit smaller, 1.2 = larger)', type: 'number', step: 0.05, when: ['aiSizeMode', 'mimic'] },
@@ -51,20 +52,7 @@ const SECTIONS = [
     { k: 'aiWeightManual', label: 'Stroke width (same units as Pen width; 0 = normal type)', type: 'number', step: 0.2, when: ['aiWeightMode', 'manual'] },
     { k: 'aiColorMode', label: "Claude's colour", type: 'select', options: [['manual', 'Manual: a colour I pick'], ['mimic', 'Mimic: the ink colour I write in there']] },
     { k: 'aiColor', label: 'Colour', type: 'color', when: ['aiColorMode', 'manual'] },
-    { k: 'writeAnimation', label: 'How Claude\'s writing appears', type: 'select', options: [['write', 'Written: each line drawn left to right, like a pen'], ['fade', 'Fade in: line by line'], ['lines', 'Line by line: each line appears at once'], ['off', 'Off: the whole block at once']] },
-    { k: 'writeAnimationMs', label: 'Time per line, in ms (smaller = faster; a whole block takes at most about 15 s)', type: 'number', step: 50, when: ['writeAnimation', 'write|fade|lines'] },
-    { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
-    { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
-    { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },
-    { k: 'paper', label: 'Default paper for new freeform sessions (each session\'s own paper: the page setup icon next to its title)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
-    { k: 'paperSpacing', label: 'Line / dot spacing on the paper', type: 'number', step: 2 },
-    { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
-    { k: 'doubleTapAction', label: 'Double tap on the page with one finger runs', type: 'select', get options() { return [['', 'Nothing'], ...(settings.savedActions || []).map((a) => [a.name, `${a.name} (action button)`])]; } },
-    { k: 'twoFingerSwap', label: 'Two-finger tap on the page switches to the last tool (e.g. pen ↔ eraser)', type: 'checkbox' },
-    { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
-  ]],
-  ['Board writing style', [
-    { k: 'writeStyle', label: 'Preset (sets everything below; change any of them and it becomes Custom)', type: 'select', options: [['compact', 'Compact: tight, fits a lot on the page'], ['comfortable', 'Comfortable: easy to read (default)'], ['textbook', 'Textbook: airy, centred equations, larger headings'], ['custom', 'Custom']] },
+    { k: 'writeStyle', label: 'Writing style preset (sets the style settings below; change any of them and it becomes Custom)', type: 'select', options: [['compact', 'Compact: tight, fits a lot on the page'], ['comfortable', 'Comfortable: easy to read (default)'], ['textbook', 'Textbook: airy, centred equations, larger headings'], ['custom', 'Custom']] },
     { k: 'textFont', label: 'Text font', type: 'select', options: [['serif', 'Serif: the same typeface as the maths (looks typeset)'], ['sans', 'Sans-serif']] },
     { k: 'lineSpacing', label: 'Line spacing', type: 'select', options: [['compact', 'Compact'], ['normal', 'Normal'], ['relaxed', 'Relaxed']] },
     { k: 'paraSpacing', label: 'Space before headings and around display equations', type: 'select', options: [['small', 'Small'], ['normal', 'Normal'], ['large', 'Large']] },
@@ -75,6 +63,21 @@ const SECTIONS = [
     { k: 'headingScale', label: 'Heading size', type: 'select', options: [['small', 'Small'], ['normal', 'Normal'], ['large', 'Large']] },
     { k: 'headingColor', label: 'Heading colour', type: 'select', options: [['darker', 'A darker shade of Claude\'s colour'], ['same', 'The same colour']] },
     { k: 'aiSideBar', label: 'Thin line to the left of Claude\'s blocks', type: 'checkbox' },
+    { k: 'writeAnimation', label: 'How Claude\'s writing appears', type: 'select', options: [['write', 'Written: each line drawn left to right, like a pen'], ['fade', 'Fade in: line by line'], ['lines', 'Line by line: each line appears at once'], ['off', 'Off: the whole block at once']] },
+    { k: 'writeAnimationMs', label: 'Time per line, in ms (smaller = faster; a whole block takes at most about 15 s)', type: 'number', step: 50, when: ['writeAnimation', 'write|fade|lines'] },
+    { heading: 'Your pen' },
+    { k: 'penWidth', label: 'Pen width', type: 'number', step: 0.2 },
+    { k: 'inkSmoothing', label: 'Ink smoothing (0 = raw, 0.3 = default, up to 0.8 = very smooth)', type: 'number', step: 0.05 },
+    { k: 'inkPrediction', label: 'Draw slightly ahead of the Pencil tip to reduce lag', type: 'checkbox' },
+    { heading: 'Paper' },
+    { k: 'paper', label: 'Default paper for new freeform sessions (each session\'s own paper: the page setup icon next to its title)', type: 'select', options: [['plain', 'Plain'], ['dots', 'Dots'], ['ruled', 'Ruled (notebook)'], ['grid', 'Grid (squared)']] },
+    { k: 'paperSpacing', label: 'Line / dot spacing on the paper', type: 'number', step: 2 },
+    { heading: 'Touch and gestures' },
+    { k: 'fingerDraws', label: 'Finger draws when no Pencil is used', type: 'checkbox' },
+    { k: 'twoFingerSwap', label: 'Two-finger tap on the page switches to the last tool (e.g. pen ↔ eraser)', type: 'checkbox' },
+    { k: 'doubleTapAction', label: 'Double tap on the page with one finger runs', type: 'select', get options() { return [['', 'Nothing'], ...(settings.savedActions || []).map((a) => [a.name, `${a.name} (action button)`])]; } },
+    { heading: 'Panel' },
+    { k: 'panelPosition', label: 'Panel position', type: 'select', options: [['right', 'Right'], ['left', 'Left'], ['bottom', 'Bottom'], ['float', 'Floating'], ['hidden', 'Hidden']] },
   ]],
   ['Cost', [
     { k: 'dailyBudgetUSD', label: 'Daily budget in US dollars (0 = no limit). When reached, watching pauses; answers still work.', type: 'number', step: 0.1 },
@@ -106,6 +109,7 @@ const SECTIONS = [
 
 // A field shown only while another (a mode select) has a given value: `when: [key, value]`.
 function fieldHtml(f) {
+  if (f.heading) return `<h4 class="set-sub">${escapeHtml(f.heading)}${f.hint ? `<small>${escapeHtml(f.hint)}</small>` : ''}</h4>`;
   const inner = fieldInner(f);
   return f.when ? `<div class="when" data-when="set-${f.when[0]}" data-is="${f.when[1]}">${inner}</div>` : inner;
 }
@@ -133,6 +137,7 @@ function modelOptions(list, current) {
 }
 
 function readField(f) {
+  if (f.heading) return;
   const el = document.getElementById('set-' + f.k.replace(/\./g, '-'));
   if (!el) return;
   let v;
