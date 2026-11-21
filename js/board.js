@@ -637,13 +637,13 @@ export class Board {
   // Keeps something Claude wrote (or a picture) on the page; writing that no longer fits continues on the next page.
   async keepOnPage(b) {
     if (!this.layout || !b) return null;
-    const s = this.pageSize(), m = this.inset();
+    const s = this.pageSize(), m = this.inset(), mv = this.insetV(); // left/right, top/bottom
     if (b.kind !== 'image' && !b.maxW) { this.fitToArea(b); this.layouts.delete(b.id); await this.layoutBlock(b); }
     if ((b.w || 0) > s.w - 2 * m) await this.scaleBlock(b.id, (s.w - 2 * m) / b.w);
     b.x = clamp(b.x, m, Math.max(m, s.w - m - (b.w || 0)));
-    b.y = Math.max(m, b.y);
-    if (b.y + (b.h || 0) <= s.h - m || b.kind === 'image') {
-      b.y = Math.min(b.y, Math.max(m, s.h - m - (b.h || 0)));
+    b.y = Math.max(mv, b.y);
+    if (b.y + (b.h || 0) <= s.h - mv || b.kind === 'image') {
+      b.y = Math.min(b.y, Math.max(mv, s.h - mv - (b.h || 0)));
       this.render();
       this.saveSoon();
       return null;
@@ -651,7 +651,7 @@ export class Board {
     // Too long for what is left of the page: the lines that fit stay here, the rest continues at the top of the
     // next page (a new blank page when there is none, or when the next one is a PDF page), page after page.
     const lay = this.layouts.get(b.id);
-    const avail = s.h - m - b.y;
+    const avail = s.h - mv - b.y;
     let fit = 0;
     if (lay && b.lines?.length > 1) {
       for (let k = 1; k <= b.lines.length; k++) {
@@ -660,7 +660,7 @@ export class Board {
         if (bottom <= avail) fit = k; else break;
       }
     }
-    if (!fit && b.y <= m + 4) fit = 1; // even one line is taller than a page: keep it here rather than loop
+    if (!fit && b.y <= mv + 4) fit = 1; // even one line is taller than a page: keep it here rather than loop
     const from = this.pi;
     let rest = null;
     if (fit && fit < (b.lines?.length || 0)) {
@@ -675,7 +675,7 @@ export class Board {
     if (from + 1 >= this.pages.length) this.newPage();
     else if (this.pages[from + 1].bg) { const np = this.newPage(); this.pages.pop(); this.pages.splice(from + 1, 0, np); this.renumber(); emit('changed'); }
     const next = this.pages[from + 1];
-    let bottom = m;
+    let bottom = mv;
     for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + 20); }
     for (const x of next.blocks) bottom = Math.max(bottom, x.y + (x.h || 0) + 20);
     rest.y = bottom;
@@ -1585,6 +1585,7 @@ export class Board {
 
   // the page margin Claude's writing keeps (Settings → Board → Claude's writing, or the session's own)
   inset() { const m = Number(this.ws().writeMargin); return Number.isFinite(m) && m >= 0 ? Math.min(160, m) : PAGE_INSET; }
+  insetV() { const m = Number(this.ws().writeMarginV); return Number.isFinite(m) && m >= 0 ? Math.min(200, m) : this.inset(); }
 
   // Claude's writing in this session: the global settings, or the session's own (Page setup)
   ws() { return writingSettings(this.sessionWriting); }
@@ -1717,14 +1718,15 @@ export class Board {
   // Where Claude may write: a notebook page minus its margins; on a freeform page, the part of the board you can
   // see now (e.g. half the screen when the panel takes the other half), minus a margin.
   writeArea() {
-    if (this.layout) { const s = this.pageSize(), m = this.inset(); return { left: m, right: s.w - m }; }
-    const vis = this.visibleWorld(), m = this.inset() / this.page.view.z; // freeform: a margin on screen
-    return { left: vis.x + m, right: vis.x + vis.w - m };
+    if (this.layout) { const s = this.pageSize(), m = this.inset(), mv = this.insetV(); return { left: m, right: s.w - m, top: mv, bottom: s.h - mv }; }
+    const vis = this.visibleWorld(), m = this.inset() / this.page.view.z, mv = this.insetV() / this.page.view.z; // freeform: margins on screen
+    return { left: vis.x + m, right: vis.x + vis.w - m, top: vis.y + mv, bottom: vis.y + vis.h - mv };
   }
 
   // Fits a block's position and wrap width into the write area (keeps at least ~half the area's width to write in).
   fitToArea(b, area = this.writeArea()) {
-    const { left, right } = area;
+    const { left, right, top } = area;
+    if (Number.isFinite(top) && Number.isFinite(b.y) && b.y < top) b.y = top; // not above the top margin
     const full = Math.max(80, right - left);
     b.x = Math.max(left, b.x);
     let maxW = right - b.x;

@@ -252,7 +252,7 @@ $('#costBtn').addEventListener('click', () => {
 });
 
 // ---------- settings → UI ----------
-const STYLE_KEYS = ['textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'writeMargin'];
+const STYLE_KEYS = ['textFont', 'lineSpacing', 'paraSpacing', 'columnChars', 'displayAlign', 'stepIndent', 'mathScale', 'headingScale', 'headingColor', 'aiSideBar', 'writeMargin', 'writeMarginV'];
 let styleStamp = null;
 function applySettings() {
   const stamp = STYLE_KEYS.map((k) => settings[k]).join('|');
