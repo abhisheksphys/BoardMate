@@ -34,16 +34,54 @@ export async function texErrors(lines) {
 
 // One board line -> { plain, text } or { tex, display }.
 // "$$...$$" or "\[...\]" = display math; other lines are text with optional inline $...$.
+// A line cut into pieces for wrapping: each $...$ whole, each word on its own, and **bold** / *italic* spans
+// spread over their words (so a wrapped italic line stays italic on every row).
+export function wrapTokens(line) {
+  const s = normaliseText(String(line))
+    .replace(/\*\*([^*]+)\*\*/g, (_, x) => x.split(/(\s+)/).map((w) => (w.trim() ? `**${w}**` : w)).join(''))
+    .replace(/(^|[\s(])\*([^*\s][^*]*?)\*/g, (_, pre, x) => pre + x.split(/(\s+)/).map((w) => (w.trim() ? `*${w}*` : w)).join(''));
+  const tokens = [];
+  for (const part of s.split(/(\$[^$]+\$)/g).filter(Boolean)) {
+    if (part.length > 1 && part.startsWith('$') && part.endsWith('$')) tokens.push(part);
+    else tokens.push(...(part.match(/\S+\s*|\s+/g) || []));
+  }
+  return tokens;
+}
+
+// opts.serif: plain words are typeset too (\text{}), so text and maths share one typeface; opts.bold: \textbf{}.
+// LaTeX written as text (outside $...$) becomes what it means instead of showing as code:
+// \textbf{x} → **x**, \textit{x} / \emph{x} → *x*, \underline / \texttt / \textsf → maths, \(x\) → $x$.
+function normaliseText(s) {
+  return s
+    .replace(/\\\((.+?)\\\)/g, (_, m) => `$${m}$`)
+    .replace(/\\textbf\{([^{}]*)\}/g, '**$1**')
+    .replace(/\\(?:textit|emph)\{([^{}]*)\}/g, '*$1*')
+    .replace(/\\(underline|texttt|textsf)\{([^{}]*)\}/g, (_, c, x) => `$\\${c}{\\text{${x}}}$`);
+}
+
+// Words with **bold** and *italic* (Markdown, as Claude writes in the panel) as TeX text pieces.
+function wordsTex(t, { bold = false, sans = false } = {}) {
+  const out = [];
+  for (const piece of t.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*?\*)/g)) {
+    if (!piece) continue;
+    let cmd = bold ? 'textbf' : sans ? 'textsf' : 'text', body = piece;
+    if (/^\*\*[^*]+\*\*$/.test(piece)) { cmd = 'textbf'; body = piece.slice(2, -2); }
+    else if (/^\*[^*\s][^*]*\*$/.test(piece) && piece.length > 2) { cmd = bold ? 'textbf' : 'textit'; body = piece.slice(1, -1); }
+    out.push(textTex(body).replace('\\text{', `\\${cmd}{`));
+  }
+  return out.join(' ');
+}
+const hasMarkup = (s) => /\*\*[^*]+\*\*|(^|[\s(])\*[^*\s][^*]*\*/.test(s);
+
 // opts.serif: plain words are typeset too (\text{}), so text and maths share one typeface; opts.bold: \textbf{}.
 export function lineToTex(line, { serif = false, bold = false } = {}) {
-  const s = String(line).trim();
+  const s = normaliseText(String(line).trim());
   const m = s.match(/^\$\$([\s\S]*)\$\$$/) || s.match(/^\\\[([\s\S]*)\\\]$/);
   if (m) return { tex: m[1].trim(), display: true };
   const parts = s.split(/(\$[^$]+\$)/g).filter(Boolean);
   const isMath = (p) => p.length > 1 && p.startsWith('$') && p.endsWith('$');
-  if (!parts.some(isMath) && !serif) return { plain: true, text: s };
-  const word = (t) => (bold ? textTex(t).replace('\\text{', '\\textbf{') : textTex(t));
-  const tex = parts.map((p) => (isMath(p) ? (bold ? `\\boldsymbol{${p.slice(1, -1)}}` : p.slice(1, -1)) : word(p))).join(' ');
+  if (!parts.some(isMath) && !serif && !hasMarkup(s)) return { plain: true, text: s };
+  const tex = parts.map((p) => (isMath(p) ? (bold ? `\\boldsymbol{${p.slice(1, -1)}}` : p.slice(1, -1)) : wordsTex(p, { bold, sans: !serif }))).join(' ');
   return { tex, display: false };
 }
 

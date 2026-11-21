@@ -481,7 +481,7 @@ export class Agent {
     const vis = b.visibleWorld();
     const style = b.aiStyle(sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null, sel);
     const fontPx = style.fontPx;
-    const gap = fontPx * 1.1;
+    const gap = b.blockGap(fontPx); // Settings → Board: space between blocks;
     let pos = sel ? { x: sel.x + sel.w + gap * 1.5, y: sel.y } : cb ? { x: cb.x + 10, y: cb.y + cb.h + gap } : { x: vis.x + 60, y: vis.y + 60 };
     { const f = { x: pos.x }; b.fitToArea(f); pos = b.placeFree({ x: f.x, y: pos.y }, { w: f.maxW, h: lines.length * fontPx * 1.9 }, sel || null); }
     b.setLocked(true);

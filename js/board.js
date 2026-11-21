@@ -2,7 +2,7 @@
 // typeset AI blocks, margin marks, and image snapshots for Claude.
 import { emit, uid, union, sleep } from './bus.js';
 import { settings, writingSettings } from './settings.js';
-import { texToImage, lineToTex } from './mathrender.js';
+import { texToImage, lineToTex, wrapTokens } from './mathrender.js';
 import { cachedBg, renderBg, bgNeedsBetter, thumbBg } from './pdfbg.js';
 
 const FONT = '-apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif';
@@ -676,8 +676,9 @@ export class Board {
     else if (this.pages[from + 1].bg) { const np = this.newPage(); this.pages.pop(); this.pages.splice(from + 1, 0, np); this.renumber(); emit('changed'); }
     const next = this.pages[from + 1];
     let bottom = mv;
-    for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + 20); }
-    for (const x of next.blocks) bottom = Math.max(bottom, x.y + (x.h || 0) + 20);
+    const gp = this.blockGap(b.fontPx || 22);
+    for (const st of next.strokes) { const bb = strokeBBox(st); bottom = Math.max(bottom, bb.y + bb.h + gp); }
+    for (const x of next.blocks) bottom = Math.max(bottom, x.y + (x.h || 0) + gp);
     rest.y = bottom;
     const anim = this.anims?.get(b.id);
     if (anim) await this.animationsDone(); // finish writing on this page before turning to the next
@@ -1392,7 +1393,7 @@ export class Board {
     const taken = [...this.page.strokes.map(strokeBBox), ...this.page.blocks.map((b) => ({ x: b.x - 12, y: b.y, w: (b.w || 100) + 12, h: b.h || 30 }))];
     const hits = (r) => taken.some((t) => t.x < r.x + r.w && t.x + t.w > r.x && t.y < r.y + r.h && t.y + t.h > r.y);
     const pr = this.layout ? this.pageRect() : null;
-    const onPage = (r) => !pr || (r.x >= PAGE_INSET && r.y >= PAGE_INSET && r.x + r.w <= pr.w - PAGE_INSET && r.y + r.h <= pr.h - PAGE_INSET);
+    const onPage = (r) => { const m = this.inset(), mv = this.insetV(); return !pr || (r.x >= m && r.y >= mv && r.x + r.w <= pr.w - m && r.y + r.h <= pr.h - mv); };
     const cands = [
       { x: line.x + 12, y: line.y + line.h + gap },
       { x: m.x + 26, y: m.y - h / 2 },
@@ -1504,6 +1505,7 @@ export class Board {
       w = Math.max(w, iw + (under && kind !== 'display' ? indent : 0));
     };
     const pushText = (text, size, bold, li, color, under) => {
+      text = String(text).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/(^|[\s(])\*([^*\s][^*]*?)\*/g, '$1$2'); // drawn as plain text: no markup stars
       const tw = measure(text, size, bold);
       items.push({ text, x: 0, y, w: tw, h: size * 1.3, fontPx: size, bold, serif, color, li, kind: bold ? 'heading' : 'text', under });
       y += size * 1.3 + gap;
@@ -1525,7 +1527,7 @@ export class Board {
       }
       const under = !bold && underHeading;
       const room = maxW - (under ? indent : 0);
-      line = line.replace(/^\s*[-*•]\s+/, '• ').replace(/\*\*([^*]+)\*\*/g, '$1');
+      line = line.replace(/^\s*[-•]\s+/, '• ').replace(/^\s*\*\s+/, '• '); // bullets; **bold** and *italic* are typeset
       const L = lineToTex(line, { serif, bold });
       if (L.display) {
         if (li && items.length) y += para * 0.5;
@@ -1541,20 +1543,19 @@ export class Board {
       if (L.plain ? measure(L.text, size, bold) <= room : ok(whole) && whole.w <= room) { if (L.plain || !ok(whole)) pushText(L.plain ? L.text : line, size, bold, li, color, under); else pushImg(whole, li, bold ? 'heading' : 'text', under); continue; }
       if (!L.plain && !ok(whole) && measure(line, size, bold) <= room) { pushText(line, size, bold, li, color, under); continue; }
       // too wide: break into pieces (words, and each $...$ kept whole) and fill rows up to the width
-      const tokens = [];
-      for (const part of line.split(/(\$[^$]+\$)/g).filter(Boolean)) {
-        if (part.length > 1 && part.startsWith('$') && part.endsWith('$')) tokens.push(part);
-        else tokens.push(...(part.match(/\S+\s*|\s+/g) || []));
-      }
+      const tokens = wrapTokens(line);
       const widthOf = async (t) => {
         if (t.startsWith('$') && t.endsWith('$') && t.length > 1) { const im = await tex(t.slice(1, -1), size, color, false); return ok(im) ? im.w : measure(t, size, bold); }
         return measure(t, size, bold);
       };
+      // hanging indent (setting): the rows after the first are set in a little, so each line's start stands out
+      const hang = st.hangIndent ? fontPx * 1.2 : 0;
       const rows = [];
       let cur = [], curW = 0;
       for (const t of tokens) {
         const tw = await widthOf(t);
-        if (cur.length && curW + tw > room) { rows.push(cur); cur = [t]; curW = tw; } else { cur.push(t); curW += tw; }
+        const lim = rows.length ? room - hang : room;
+        if (cur.length && curW + tw > lim) { rows.push(cur); cur = [t]; curW = tw; } else { cur.push(t); curW += tw; }
       }
       if (cur.length) rows.push(cur);
       // each row typeset; if the typeset row is still too wide (estimates differ a little), its last word moves down
@@ -1562,10 +1563,15 @@ export class Board {
         const text = rows[r].join('').trim();
         if (!text) continue;
         const R = lineToTex(text, { serif, bold });
-        if (R.plain) { pushText(R.text, size, bold, li, color, under); continue; }
-        const im = await tex(R.tex, size, color, false);
-        if (ok(im) && im.w > room * 1.02 && rows[r].length > 1) { (rows[r + 1] ||= []).unshift(rows[r].pop()); r--; continue; }
-        if (ok(im)) pushImg(im, li, bold ? 'heading' : 'text', under); else pushText(text, size, bold, li, color, under);
+        const n0 = items.length;
+        const lim = r ? room - hang : room;
+        if (R.plain) pushText(R.text, size, bold, li, color, under);
+        else {
+          const im = await tex(R.tex, size, color, false);
+          if (ok(im) && im.w > lim * 1.02 && rows[r].length > 1) { (rows[r + 1] ||= []).unshift(rows[r].pop()); r--; continue; }
+          if (ok(im)) pushImg(im, li, bold ? 'heading' : 'text', under); else pushText(text, size, bold, li, color, under);
+        }
+        if (r && hang) for (let q = n0; q < items.length; q++) { items[q].hang = hang; w = Math.max(w, items[q].w + hang + (under ? indent : 0)); }
       }
     }
     // indent lines under headings; centre display equations in the column
@@ -1573,6 +1579,7 @@ export class Board {
     for (const it of items) {
       if (it.kind === 'display' && st.displayAlign !== 'left') it.x = Math.max(0, (colW - it.w) / 2);
       else if (it.under && it.kind !== 'heading') it.x = indent;
+      if (it.hang) it.x += it.hang;
     }
     w = Math.max(w, ...items.map((it) => it.x + it.w));
     const lay = { items, w, h: Math.max(fontPx, y - gap) };
@@ -1583,7 +1590,12 @@ export class Board {
     return lay;
   }
 
-  // the page margin Claude's writing keeps (Settings → Board → Claude's writing, or the session's own)
+  // Block padding: the space between a block's side bar and its text (and a little above / below the text).
+  blockPad(b) { return ({ none: 0.15, small: 0.35, normal: 0.6, large: 1.0 }[this.ws().blockPadding] ?? 0.6) * (b?.fontPx || 22); }
+  // Space Claude leaves between its block and the writing above it (yours or its own).
+  blockGap(fontPx = 22) { return ({ small: 0.6, normal: 1.1, large: 1.8 }[this.ws().blockGap] ?? 1.1) * fontPx; }
+
+  // the page padding Claude's writing keeps (Settings → Board → Claude's writing, or the session's own)
   inset() { const m = Number(this.ws().writeMargin); return Number.isFinite(m) && m >= 0 ? Math.min(160, m) : PAGE_INSET; }
   insetV() { const m = Number(this.ws().writeMarginV); return Number.isFinite(m) && m >= 0 ? Math.min(200, m) : this.inset(); }
 
@@ -1603,7 +1615,7 @@ export class Board {
       if (b.kind === 'image') continue;
       this.layouts.delete(b.id);
       // notebook: the page margin may have changed, so the text width follows it (unless you set the width by hand)
-      if (this.layout && !b.fixedW && b.author !== 'user') this.fitToArea(b, { left: m, right: this.pageSize(p).w - m });
+      if (this.layout && !b.fixedW && b.author !== 'user') this.fitToArea(b, { left: m, right: this.pageSize(p).w - m, top: this.insetV() });
     }
     this.prepareBlocks();
     this.prepareNeighbours?.();
@@ -1621,7 +1633,7 @@ export class Board {
   placeFree(pos, { w, h }, near = null) {
     const pad = 10;
     const occupied = [
-      ...this.page.blocks.map((b) => ({ x: b.x - 12, y: b.y, w: (b.w || 100) + 12, h: b.h || 30 })),
+      ...this.page.blocks.map((b) => { const pd = b.kind === 'image' ? 0 : this.blockPad(b) + 3; return { x: b.x - pd, y: b.y - pd * 0.25, w: (b.w || 100) + pd, h: (b.h || 30) + pd * 0.5 }; }),
       ...this.page.strokes.map(strokeBBox),
     ];
     const hits = (r) => occupied.filter((o) => o.x < r.x + r.w + pad && o.x + o.w + pad > r.x && o.y < r.y + r.h + pad && o.y + o.h + pad > r.y);
@@ -1634,12 +1646,13 @@ export class Board {
       grew = false;
       for (const o of occupied) if (close(o) && (o.x < g.x || o.y < g.y || o.x + o.w > g.x + g.w || o.y + o.h > g.y + g.h)) { g = union(g, o); grew = true; }
     }
-    const p = { x: Math.max(g.x + 12, this.writeArea().left), y: g.y + g.h + 26 }; // +12: room for a block's side bar
+    const gapY = this.blockGap(this.aiStyle(null).fontPx);
+    const p = { x: Math.max(g.x + this.blockPad() + 3, this.writeArea().left), y: g.y + g.h + gapY }; // room for a block's side bar
     // past anything still in the way, further down
     for (let n = 0; n < 60; n++) {
       const inWay = hits({ x: p.x, y: p.y, w, h: first });
       if (!inWay.length) break;
-      p.y = Math.max(...inWay.map((o) => o.y + o.h)) + 26;
+      p.y = Math.max(...inWay.map((o) => o.y + o.h)) + gapY;
     }
     return p;
   }
@@ -1725,7 +1738,8 @@ export class Board {
 
   // Fits a block's position and wrap width into the write area (keeps at least ~half the area's width to write in).
   fitToArea(b, area = this.writeArea()) {
-    const { left, right, top } = area;
+    const { right, top } = area;
+    const left = area.left + (b.kind !== 'image' && this.ws().aiSideBar !== false ? this.blockPad(b) + 3 : 0); // the side bar and padding stay inside the page padding
     if (Number.isFinite(top) && Number.isFinite(b.y) && b.y < top) b.y = top; // not above the top margin
     const full = Math.max(80, right - left);
     b.x = Math.max(left, b.x);
@@ -1755,8 +1769,9 @@ export class Board {
     if (this.layout) {
       // notebook: below what is on the page, as wide as fits
       const s = this.pageSize();
-      const scale = Math.min(1, 520 / w, (s.w - 2 * PAGE_INSET) / w);
-      const b = await this.addBlock({ kind: 'image', src, x: PAGE_INSET, y: cb ? cb.y + cb.h + 30 : PAGE_INSET, w: w * scale, h: h * scale });
+      const m = this.inset(), mv = this.insetV();
+      const scale = Math.min(1, 520 / w, (s.w - 2 * m) / w);
+      const b = await this.addBlock({ kind: 'image', src, x: m, y: cb ? cb.y + cb.h + 30 : mv, w: w * scale, h: h * scale });
       await this.keepOnPage(b);
       return b;
     }
@@ -2195,7 +2210,8 @@ export class Board {
       const an = ctx === this.ctx && this.anims?.get(b.id), its = an && this.layouts.get(b.id)?.items;
       let bh = b.h || 24;
       if (its?.length) { const i = Math.min(its.length - 1, Math.floor((performance.now() - an.t0) / an.per)); bh = Math.min(bh, its[i].y + its[i].h); }
-      ctx.fillRect(b.x - 9, b.y, 2.5, bh);
+      const pad = this.blockPad(b);
+      ctx.fillRect(b.x - pad - 2.5, b.y - pad * 0.25, 2.5, bh + pad * 0.5);
     }
     if (!lay || (this.noImageBlocks && b.kind !== 'image')) {
       ctx.fillStyle = b.color || '#1a5fd0';

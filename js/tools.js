@@ -26,7 +26,7 @@ export const TOOL_SCHEMAS = [
     name: 'write_on_canvas',
     description:
       'Write typeset content on the board in the AI colour. `lines`: one entry per line. A line wrapped in $$...$$ is display math; other lines are text that may contain inline $...$; ' +
-      '"# Title" / "## Section" lines are headings; "- item" is a bullet. Long lines wrap automatically to fit the page (or the visible board); in a notebook, content longer than the page continues on the next page. ' +
+      '"# Title" / "## Section" lines are headings; "- item" is a bullet; **bold** and *italic* work in text. Long lines wrap automatically to fit the page (or the visible board); in a notebook, content longer than the page continues on the next page. ' +
       'It never overlaps what is already on the page: if the spot you choose is crowded (e.g. a selection inside a block or paragraph), it goes below that whole block or paragraph instead. ' +
       'Write as much as the request needs: a full explanation or derivation gets headings, explanatory sentences and every step, like a complete answer; a correction or a missing step stays short. Position: anchor "below_content" (default), "below_selection", "right_of_selection", or "at_xy" with x,y = top-left in pixels of the latest page image.',
     input_schema: {
@@ -131,7 +131,7 @@ export const TOOL_SCHEMAS = [
       `Change app settings immediately. Allowed keys: ${AI_EDITABLE.join(', ')}. ` +
       'attention: live|quiet|demand. answerDepth: auto|brief|detailed ("always answer in more detail" → detailed). panelPosition: right|left|bottom|float|hidden. customInstructions: array of standing instructions for you. ' +
       'Only use when the user asked for the change or agreed to your suggestion.',
-    input_schema: { type: 'object', properties: { patch: { type: 'object' }, scope: { type: 'string', enum: ['global', 'session'], description: 'session: only for this session, for Claude\'s writing keys (aiSizeMode, aiSizeScale, aiSizeManual, aiSizeFixed, aiWeightMode, aiWeightManual, aiColorMode, aiColor, writeStyle = compact|comfortable|textbook, writeMargin = left/right margin, writeMarginV = top/bottom margin, each 16|40|64|96), e.g. "in this session write in dark green, 12 pt"; patch null-like {"reset": true} returns the session to the defaults. Default: global.' }, reason: { type: 'string' } }, required: ['patch'] },
+    input_schema: { type: 'object', properties: { patch: { type: 'object' }, scope: { type: 'string', enum: ['global', 'session'], description: 'session: only for this session, for Claude\'s writing keys (aiSizeMode, aiSizeScale, aiSizeManual, aiSizeFixed, aiWeightMode, aiWeightManual, aiColorMode, aiColor, writeStyle = compact|comfortable|textbook, writeMargin = page padding left/right, writeMarginV = page padding top/bottom, each 16|40|64|96; blockPadding = none|small|normal|large; blockGap = small|normal|large), e.g. "in this session write in dark green, 12 pt"; patch null-like {"reset": true} returns the session to the defaults. Default: global.' }, reason: { type: 'string' } }, required: ['patch'] },
   },
   {
     name: 'save_action',
@@ -218,7 +218,7 @@ export async function runTool(use, ctx) {
         const sizeRef = anchor === 'at_xy' && snap && Number.isFinite(inp.x) ? board.imageToWorld(snap, inp.x, inp.y) : sel ? { x: sel.x, y: sel.y + sel.h } : cb ? { x: cb.x, y: cb.y + cb.h } : null;
         const style = board.aiStyle(sizeRef, sel, inp.size_scale);
         const fontPx = style.fontPx;
-        const gap = fontPx * 1.1;
+        const gap = board.blockGap(fontPx); // Settings → Board: space between blocks;
         if (anchor === 'at_xy' && snap && Number.isFinite(inp.x) && Number.isFinite(inp.y)) pos = board.imageToWorld(snap, inp.x, inp.y);
         else if (anchor === 'below_selection' && sel) pos = { x: sel.x, y: sel.y + sel.h + gap };
         else if (anchor === 'right_of_selection' && sel) pos = { x: sel.x + sel.w + gap * 1.5, y: sel.y };
