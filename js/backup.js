@@ -88,7 +88,7 @@ export class Backup {
     let ref = await this.api(`/git/ref/heads/${encodeURIComponent(branch)}`, { allow: [404, 409] });
     if (ref.status) {
       // an empty repository: the first file has to be created with the contents API
-      await this.api('/contents/README.md', { method: 'PUT', body: { message: 'Start Live Board backups', content: textToB64('# Live Board backups\n\nSessions, PDFs and settings saved by the Live Board app. Restore them from the app: Settings → Backup → Restore from GitHub.\n'), branch } });
+      await this.api('/contents/README.md', { method: 'PUT', body: { message: 'Start BoardMate backups', content: textToB64('# BoardMate backups\n\nSessions, PDFs and settings saved by the BoardMate app. Restore them from the app: Settings → Backup → Restore from GitHub.\n'), branch } });
       ref = await this.api(`/git/ref/heads/${encodeURIComponent(branch)}`);
     }
     return { branch, head: ref.object.sha };

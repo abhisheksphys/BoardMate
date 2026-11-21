@@ -1,4 +1,4 @@
-# Live Board
+# BoardMate
 
 A handwriting whiteboard for iPad where Claude watches the page, listens, answers in a side panel or by voice, writes typeset math on the board, and can change this app's own code with your approval.
 

@@ -36,7 +36,7 @@ function loadPdfLib() {
   return pdflibLoading;
 }
 
-const safeName = (t) => String(t || 'Live Board').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Live Board';
+const safeName = (t) => String(t || 'BoardMate').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'BoardMate';
 
 // Runs fn with page i as the board's page (without showing it), its blocks laid out, then switches back.
 async function withPage(board, i, fn) {
@@ -154,7 +154,7 @@ export class Exporter {
     this.sessions = sessions;
   }
 
-  title() { return this.sessions?.meta?.title || 'Live Board'; }
+  title() { return this.sessions?.meta?.title || 'BoardMate'; }
 
   pagesWithContent() {
     const b = this.board;
@@ -259,7 +259,7 @@ export class Exporter {
       page.drawImage(img, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
     }
     out.setTitle(this.title());
-    out.setCreator('Live Board');
+    out.setCreator('BoardMate');
     const bytes = await out.save();
     const file = new File([bytes], `${safeName(this.title())}.pdf`, { type: 'application/pdf' });
     const blanks = pages.filter(({ p }) => !p.bg).length;

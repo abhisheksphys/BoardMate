@@ -25,13 +25,13 @@ function db() {
         d.onversionchange = () => {
           d.close();
           dbPromise = null;
-          emit('storage-error', 'Live Board was updated in another tab. Reload this tab to keep working.');
+          emit('storage-error', 'BoardMate was updated in another tab. Reload this tab to keep working.');
         };
         resolve(d);
       };
       req.onerror = () => { dbPromise = null; reject(req.error || new Error('Could not open storage')); };
       // An older copy of the app is still open somewhere and holding the storage: the upgrade waits for it.
-      req.onblocked = () => emit('storage-error', 'Live Board is open in another Safari tab with an older version. Close that tab and this page will finish loading.');
+      req.onblocked = () => emit('storage-error', 'BoardMate is open in another Safari tab with an older version. Close that tab and this page will finish loading.');
     }));
   }
   return dbPromise;

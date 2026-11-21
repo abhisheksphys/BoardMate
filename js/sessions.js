@@ -609,8 +609,8 @@ export class Sessions {
 
   async restoreFrom(file) {
     let j;
-    try { j = JSON.parse(await file.text()); } catch { return this.panel.add('error', "That file isn't a Live Board backup."); }
-    if (j?.app !== 'live-board' || !Array.isArray(j.sessions)) return this.panel.add('error', "That file isn't a Live Board backup.");
+    try { j = JSON.parse(await file.text()); } catch { return this.panel.add('error', "That file isn't a BoardMate backup."); }
+    if (j?.app !== 'live-board' || !Array.isArray(j.sessions)) return this.panel.add('error', "That file isn't a BoardMate backup.");
     return this.restoreData(j);
   }
 

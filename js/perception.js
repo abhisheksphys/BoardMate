@@ -112,7 +112,7 @@ export class Perception {
   report() {
     const s = settings;
     return [
-      'Live Board watching log',
+      'BoardMate watching log',
       `when: ${new Date().toString()}`,
       `settings: mode=${s.attention} liveLookAfter=${s.watchIdleSec}s quietLookAfter=${s.quietIdleSec}s lookAtLeastEvery=${s.watchMaxWaitSec}s boardRequests=${s.boardRequests} escalate=${s.escalate} model=${s.models.fast} apiKey=${s.apiKey ? 'set' : 'MISSING'}`,
       `state: looking=${!!this.running} waiting=${!!this.pending?.length} claudeAnswering=${!!this.agent.busy} notesOnThisPage=${this.board.page.notebook.length}`,

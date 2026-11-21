@@ -61,7 +61,7 @@ class Voice {
     const keys = ['voiceSend', 'voiceSendDelaySec', 'headphones', 'voiceOut', 'narration', 'liveSpeak', 'wakeWord'];
     const conf = keys.map((k) => `${k}=${JSON.stringify(settings[k])}`).join(' ');
     return [
-      'Live Board voice log',
+      'BoardMate voice log',
       `when: ${new Date().toString()}`,
       `browser: ${navigator.userAgent}`,
       `standalone (home-screen app): ${window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches}`,
@@ -426,7 +426,7 @@ class Voice {
   testVoice() {
     this.unlocked = true;
     speechSynthesis.cancel?.();
-    this.speak('This is Live Board. If you can hear me, speech output works.', 'test button');
+    this.speak('This is BoardMate. If you can hear me, speech output works.', 'test button');
   }
 
   isSpeaking() {

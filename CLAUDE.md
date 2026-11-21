@@ -1,4 +1,4 @@
-# Live Board — notes for the coding agent
+# BoardMate — notes for the coding agent
 
 A personal handwriting whiteboard. Claude watches the page (images), listens (speech-to-text), answers in a panel or by voice, writes typeset math on the board, and can change this app's own code through pull requests the owner approves.
 

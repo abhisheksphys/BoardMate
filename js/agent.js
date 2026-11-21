@@ -67,7 +67,7 @@ Reply with ONE JSON object: {"lines": ["...", "..."], "correct": false}
 function systemPrompt() {
   const s = settings;
   const custom = s.customInstructions?.length ? `\nStanding instructions from the user:\n- ${s.customInstructions.join('\n- ')}\n` : '';
-  return `You are the live assistant inside "Live Board", a handwriting whiteboard the user writes on with an Apple Pencil. The user is a scientist. You see their page as images, hear them through speech-to-text, and read their typed messages.
+  return `You are the live assistant inside "BoardMate", a handwriting whiteboard the user writes on with an Apple Pencil. The user is a scientist. You see their page as images, hear them through speech-to-text, and read their typed messages.
 
 Understanding the board
 - Read the page images directly, the way you would read a photo of notes or a book page. The user refers to things freely ("the one that looks like Maxwell's equation", "my second line", "what I just crossed out", "this" while something is selected). Work out what they mean from the image; ask only if it is genuinely ambiguous.

@@ -6,12 +6,16 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Live Board">
+  <meta name="apple-mobile-web-app-title" content="BoardMate">
   <meta name="theme-color" content="#f6f5f2">
-  <title>Live Board</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2026.11.21-0608">
+  <title>BoardMate</title>
+  <link rel="manifest" href="manifest.webmanifest?v=2">
+  <!-- Icons: PNG for the browser tab and the iPad Home Screen (Safari and Chrome on iPad ignore an SVG icon there) -->
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=2">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png?v=2">
+  <link rel="icon" type="image/svg+xml" href="icon.svg?v=2">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=2">
+  <link rel="stylesheet" href="styles.css?v=2026.11.21-0626">
   <script>
     window.MathJax = {
       tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
@@ -49,7 +53,7 @@
       window.showAppError('Something went wrong: ' + ((r && r.message) || r) + where);
     });
     setTimeout(function () {
-      if (!window.liveBoardReady) window.showAppError("The app hasn't finished starting. If Live Board is open in another Safari tab, close that tab; otherwise reload this page.");
+      if (!window.liveBoardReady) window.showAppError("The app hasn't finished starting. If BoardMate is open in another Safari tab, close that tab; otherwise reload this page.");
     }, 9000);
   </script>
   <!-- Cache busting: every module is fetched with this update's version, so new files never mix with cached old ones. -->
@@ -161,37 +165,37 @@
   </dialog>
   <script type="importmap">{
  "imports": {
-  "./js/agent.js": "./js/agent.js?v=2026.11.21-0608",
-  "./js/app.js": "./js/app.js?v=2026.11.21-0608",
-  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0608",
-  "./js/backup.js": "./js/backup.js?v=2026.11.21-0608",
-  "./js/board.js": "./js/board.js?v=2026.11.21-0608",
-  "./js/bus.js": "./js/bus.js?v=2026.11.21-0608",
-  "./js/cas.js": "./js/cas.js?v=2026.11.21-0608",
-  "./js/changes.js": "./js/changes.js?v=2026.11.21-0608",
-  "./js/claude.js": "./js/claude.js?v=2026.11.21-0608",
-  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0608",
-  "./js/costs.js": "./js/costs.js?v=2026.11.21-0608",
-  "./js/export.js": "./js/export.js?v=2026.11.21-0608",
-  "./js/github.js": "./js/github.js?v=2026.11.21-0608",
-  "./js/images.js": "./js/images.js?v=2026.11.21-0608",
-  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0608",
-  "./js/library.js": "./js/library.js?v=2026.11.21-0608",
-  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0608",
-  "./js/pages.js": "./js/pages.js?v=2026.11.21-0608",
-  "./js/panel.js": "./js/panel.js?v=2026.11.21-0608",
-  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0608",
-  "./js/perception.js": "./js/perception.js?v=2026.11.21-0608",
-  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0608",
-  "./js/settings.js": "./js/settings.js?v=2026.11.21-0608",
-  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0608",
-  "./js/storage.js": "./js/storage.js?v=2026.11.21-0608",
-  "./js/tools.js": "./js/tools.js?v=2026.11.21-0608",
-  "./js/version.js": "./js/version.js?v=2026.11.21-0608",
-  "./js/voice.js": "./js/voice.js?v=2026.11.21-0608"
+  "./js/agent.js": "./js/agent.js?v=2026.11.21-0626",
+  "./js/app.js": "./js/app.js?v=2026.11.21-0626",
+  "./js/awareness.js": "./js/awareness.js?v=2026.11.21-0626",
+  "./js/backup.js": "./js/backup.js?v=2026.11.21-0626",
+  "./js/board.js": "./js/board.js?v=2026.11.21-0626",
+  "./js/bus.js": "./js/bus.js?v=2026.11.21-0626",
+  "./js/cas.js": "./js/cas.js?v=2026.11.21-0626",
+  "./js/changes.js": "./js/changes.js?v=2026.11.21-0626",
+  "./js/claude.js": "./js/claude.js?v=2026.11.21-0626",
+  "./js/codeagent.js": "./js/codeagent.js?v=2026.11.21-0626",
+  "./js/costs.js": "./js/costs.js?v=2026.11.21-0626",
+  "./js/export.js": "./js/export.js?v=2026.11.21-0626",
+  "./js/github.js": "./js/github.js?v=2026.11.21-0626",
+  "./js/images.js": "./js/images.js?v=2026.11.21-0626",
+  "./js/inktools.js": "./js/inktools.js?v=2026.11.21-0626",
+  "./js/library.js": "./js/library.js?v=2026.11.21-0626",
+  "./js/mathrender.js": "./js/mathrender.js?v=2026.11.21-0626",
+  "./js/pages.js": "./js/pages.js?v=2026.11.21-0626",
+  "./js/panel.js": "./js/panel.js?v=2026.11.21-0626",
+  "./js/pdfbg.js": "./js/pdfbg.js?v=2026.11.21-0626",
+  "./js/perception.js": "./js/perception.js?v=2026.11.21-0626",
+  "./js/sessions.js": "./js/sessions.js?v=2026.11.21-0626",
+  "./js/settings.js": "./js/settings.js?v=2026.11.21-0626",
+  "./js/settingsUI.js": "./js/settingsUI.js?v=2026.11.21-0626",
+  "./js/storage.js": "./js/storage.js?v=2026.11.21-0626",
+  "./js/tools.js": "./js/tools.js?v=2026.11.21-0626",
+  "./js/version.js": "./js/version.js?v=2026.11.21-0626",
+  "./js/voice.js": "./js/voice.js?v=2026.11.21-0626"
  }
 }</script>
-  <script type="module" src="js/app.js?v=2026.11.21-0608"></script>
+  <script type="module" src="js/app.js?v=2026.11.21-0626"></script>
 </head>
 <body class="panel-right">
   <div id="updBar" role="status" hidden><span></span><button type="button" id="updGo">Update now</button><button type="button" aria-label="Later" onclick="this.parentNode.hidden=true">Later</button></div>

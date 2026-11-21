@@ -27,7 +27,7 @@ const TOOLS = [
   },
 ];
 
-const SYSTEM = `You are the coding agent for "Live Board", a personal web app: a handwriting whiteboard where Claude watches, listens, answers, and writes typeset math. It is a static site (plain HTML, CSS and ES modules, no build step) hosted on GitHub Pages.
+const SYSTEM = `You are the coding agent for "BoardMate", a personal web app: a handwriting whiteboard where Claude watches, listens, answers, and writes typeset math. It is a static site (plain HTML, CSS and ES modules, no build step) hosted on GitHub Pages.
 
 How to work
 - Start by reading CLAUDE.md, then list_files, then read every file you will touch.
@@ -74,6 +74,6 @@ export async function runCodeAgent(request, { onStatus, signal } = {}) {
   if (!files.length) return { noChange: true, ...done };
   const branch = `claude/${slug(done.title)}-${Date.now().toString(36)}`;
   const { baseSha } = await gh.commitToNewBranch(branch, pending, done.title);
-  const pr = await gh.openPR(branch, done.title, `${done.summary}\n\n---\nRequest: ${request}\n\n_Opened by the Live Board coding agent._`);
+  const pr = await gh.openPR(branch, done.title, `${done.summary}\n\n---\nRequest: ${request}\n\n_Opened by the BoardMate coding agent._`);
   return { pr, branch, baseSha, files, ...done };
 }

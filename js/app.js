@@ -301,7 +301,7 @@ async function checkForUpdate() {
     const latest = ((await r.text()).match(/VERSION = '([^']+)'/) || [])[1];
     if (!latest || latest === VERSION || latest < VERSION) return;
     const bar = $('#updBar');
-    bar.querySelector('span').textContent = `A new version of Live Board is ready (${latest}; this one is ${VERSION}).`;
+    bar.querySelector('span').textContent = `A new version of BoardMate is ready (${latest}; this one is ${VERSION}).`;
     bar.hidden = false;
   } catch { /* offline: try again later */ }
 }
